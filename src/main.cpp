@@ -10,7 +10,7 @@
   MIT license, check LICENSE for more information
   All text above, and the splash screen below must be included in
   any redistribution
-*********************************************************************/
+ *********************************************************************/
 #include <bluefruit.h>
 
 // Beacon uses the Manufacturer Specific Data field in the advertising
@@ -25,10 +25,12 @@
 // UUID Characteristc Descriptor for Environment Sensing Measurement
 #define UUID_CHR_DESCRIPTOR_ES_MEAS  0x290C
 
+void updateESMeasure(uint8_t op);
 void startAdv(void);
 void setupES(void);
 void disconnect_callback(uint16_t conn_handle, uint8_t reason);
 void connect_callback(uint16_t conn_handle);
+void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_value);
 
 // Environmental Sensing Service is 0x181A
 BLEService        ess = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
@@ -37,103 +39,126 @@ BLECharacteristic tmpc = BLECharacteristic(UUID16_CHR_TEMPERATURE);
 // GATT Characteristic and Object Type 0x2A6F Humidity
 BLECharacteristic humc = BLECharacteristic(UUID16_CHR_HUMIDITY);
 
+int16_t temperature = -10;
+uint16_t humidity = 52;
+
+void updateESMeasure(uint8_t op) {
+    // Temperature and Humidity measures have factor multiplied by 0.01
+    // by the characteristic, and so we multiply it by 100
+    int16_t temp = temperature * 100;
+    uint16_t hum = humidity * 100;
+    uint8_t *tp = (uint8_t *) &temp;
+    uint8_t *hp = (uint8_t *) &hum;
+    if (op == 1) {
+        tmpc.write(tp, sizeof(temp));
+        humc.write(hp, sizeof(hum));
+    }
+    else if (op == 2) {
+        if (tmpc.notify(tp, sizeof(temp))) {
+            Serial.print("Temperature Measurement updated to: ");
+            Serial.println(temp);
+        }
+        else {
+            Serial.println("ERROR: Notify not set in CCCD or not connected!");
+        }
+        if (humc.notify(hp, sizeof(hum))) {
+            Serial.print("Humidity Measurement updated to: ");
+            Serial.println(hum);
+        }
+        else {
+            Serial.println("ERROR: Notify not set in CCCD or not connected!");
+        }
+    }
+}
 
 void setup()
 {
-  Serial.begin(115200);
+    Serial.begin(115200);
 
-  while ( !Serial ) delay(10);
+    while ( !Serial ) delay(10);
 
-  Serial.println("\nBluefruit52 GATT ESS Example");
-  Serial.println("--------------------------");
+    Serial.println("\nBluefruit52 GATT ESS Example");
+    Serial.println("--------------------------");
 
-  Bluefruit.begin();
+    Bluefruit.begin();
 
-  // Set the connect/disconnect callback handlers
-  Bluefruit.Periph.setConnectCallback(connect_callback);
-  Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
+    // Set the connect/disconnect callback handlers
+    Bluefruit.Periph.setConnectCallback(connect_callback);
+    Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
 
-  // BLEService and BLECharacteristic classes
-  Serial.println("Configuring the Environmental Sensing Service");
-  setupES();
+    // BLEService and BLECharacteristic classes
+    Serial.println("Configuring the Environmental Sensing Service");
+    setupES();
 
-  // Setup the advertising packet(s)
-  Serial.println("Setting up the advertising payload(s)");
-  startAdv();
+    // Setup the advertising packet(s)
+    Serial.println("Setting up the advertising payload(s)");
+    startAdv();
 
-  Serial.println("\nAdvertising");
+    Serial.println("\nAdvertising");
 }
 
 void startAdv(void)
 {
-  Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
-  Bluefruit.Advertising.addTxPower();
+    Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+    Bluefruit.Advertising.addTxPower();
 
-  Bluefruit.Advertising.addService(ess);
+    Bluefruit.Advertising.addService(ess);
 
-  // Include Name
-  Bluefruit.Advertising.addName();
+    // Include Name
+    Bluefruit.Advertising.addName();
 
-  /* Start Advertising
-     - Enable auto advertising if disconnected
-     - Timeout for fast mode is 30 seconds
-     - Start(timeout) with timeout = 0 will advertise forever (until connected)
+    /* Start Advertising
+       - Enable auto advertising if disconnected
+       - Timeout for fast mode is 30 seconds
+       - Start(timeout) with timeout = 0 will advertise forever (until connected)
 
-     Apple Beacon specs
-     - Type: Non connectable, undirected
-     - Fixed interval: 100 ms -> fast = slow = 100 ms
-  */
-  // Bluefruit.Advertising.setType(BLE_GAP_ADV_TYPE_NONCONNECTABLE_SCANNABLE_UNDIRECTED);
-  Bluefruit.Advertising.restartOnDisconnect(true);
-  Bluefruit.Advertising.setInterval(32, 244);    // in unit of 0.625 ms
-  // Bluefruit.Advertising.setInterval(160, 160);    // in unit of 0.625 ms
-  Bluefruit.Advertising.setFastTimeout(30);      // number of seconds in fast mode
-  Bluefruit.Advertising.start(0);                // 0 = Don't stop advertising after n seconds
+       Apple Beacon specs
+       - Type: Non connectable, undirected
+       - Fixed interval: 100 ms -> fast = slow = 100 ms
+       */
+    // Bluefruit.Advertising.setType(BLE_GAP_ADV_TYPE_NONCONNECTABLE_SCANNABLE_UNDIRECTED);
+    Bluefruit.Advertising.restartOnDisconnect(true);
+    Bluefruit.Advertising.setInterval(32, 244);    // in unit of 0.625 ms
+    // Bluefruit.Advertising.setInterval(160, 160);    // in unit of 0.625 ms
+    Bluefruit.Advertising.setFastTimeout(30);      // number of seconds in fast mode
+    Bluefruit.Advertising.start(0);                // 0 = Don't stop advertising after n seconds
 }
 
 void setupES(void)
 {
-  ess.begin();
+    ess.begin();
 
-  tmpc.setProperties(CHR_PROPS_READ);
-  tmpc.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
-  // tmpc.setFixedLen(2);
-  tmpc.begin();
-  uint8_t esm_desc[11] = { 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00 }; 
-  if (tmpc.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &esm_desc, sizeof(esm_desc))) {
-      Serial.println("Error addDescriptor call");
-  }
-  // Temperature measure has multiplication factor of 0.01
-  // uint8_t temp[2] = { 0xff, 0xba }; // -70 as >sint16
-  int16_t temp = -700;
-  uint8_t *src = (uint8_t *) &temp;
-  tmpc.write(src, 2);
+    tmpc.setProperties(CHR_PROPS_NOTIFY);
+    tmpc.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    tmpc.setCccdWriteCallback(cccd_callback);
+    // tmpc.setFixedLen(2);
+    tmpc.begin();
+    uint8_t esm_desc[11] = { 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00 }; 
+    if (tmpc.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &esm_desc, sizeof(esm_desc))) {
+        Serial.println("Error addDescriptor call");
+    }
 
-
-  humc.setProperties(CHR_PROPS_READ);
-  humc.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
-  humc.begin();
-  if (humc.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &esm_desc, sizeof(esm_desc))) {
-      Serial.println("Error addDescriptor call");
-  }
-  // Humidity measure has multiplication factor of 0.01
-  // uint8_t hum[2] = { 0x8a, 0x02 }; // 650 as >uint16
-  uint16_t hum = 6500; // 650 as >uint16
-  src = (uint8_t *) &hum;
-  humc.write(src, 2);
+    humc.setProperties(CHR_PROPS_NOTIFY);
+    humc.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    humc.setCccdWriteCallback(cccd_callback);
+    humc.begin();
+    if (humc.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &esm_desc, sizeof(esm_desc))) {
+        Serial.println("Error addDescriptor call");
+    }
+    updateESMeasure(1);
 }
 
 void connect_callback(uint16_t conn_handle)
 {
-  // Get the reference to current connection
-  BLEConnection* connection = Bluefruit.Connection(conn_handle);
+    // Get the reference to current connection
+    BLEConnection* connection = Bluefruit.Connection(conn_handle);
 
-  char central_name[32] = { 0 };
-  connection->getPeerName(central_name, sizeof(central_name));
+    char central_name[32] = { 0 };
+    connection->getPeerName(central_name, sizeof(central_name));
 
-  Serial.print("Connected to ");
-  Serial.println(central_name);
-  digitalWrite(1, LED_CONN);
+    Serial.print("Connected to ");
+    Serial.println(central_name);
+    digitalWrite(1, LED_CONN);
 }
 
 /**
@@ -143,16 +168,44 @@ void connect_callback(uint16_t conn_handle)
  */
 void disconnect_callback(uint16_t conn_handle, uint8_t reason)
 {
-  (void) conn_handle;
-  (void) reason;
+    (void) conn_handle;
+    (void) reason;
 
-  Serial.print("Disconnected, reason = 0x"); Serial.println(reason, HEX);
-  Serial.println("Advertising!");
-  digitalWrite(0, LED_CONN);
+    Serial.print("Disconnected, reason = 0x"); Serial.println(reason, HEX);
+    Serial.println("Advertising!");
+    digitalWrite(0, LED_CONN);
+}
+
+void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_value)
+{
+    // Display the raw request packet
+    Serial.print("CCCD Updated: ");
+    //Serial.printBuffer(request->data, request->len);
+    Serial.print(cccd_value);
+    Serial.println("");
+
+    // Check the characteristic this CCCD update is associated with in case
+    // this handler is used for multiple CCCD records.
+    if (chr->uuid == tmpc.uuid) {
+        Serial.print("Temperature Characteristic ");
+    }
+    else if (chr->uuid == humc.uuid) {
+        Serial.print("Humidity Characteristic ");
+    }
+    if (chr->notifyEnabled(conn_hdl)) {
+        Serial.println("'Notify' enabled");
+    } else {
+        Serial.println("'Notify' disabled");
+    }
 }
 
 void loop()
 {
-  delay(1000);
+    if ( Bluefruit.connected() ) {
+        temperature++;
+        humidity++;
+        updateESMeasure(2);
+    }
+    delay(1000);
 }
 
