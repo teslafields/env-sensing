@@ -24,10 +24,17 @@
 
 // UUID Characteristc Descriptor for Environment Sensing Measurement
 #define UUID_CHR_DESCRIPTOR_ES_MEAS  0x290C
+#define UUID16_CHR_CO_PPM            0x2BD0
 
-void updateESMeasure(uint8_t op);
+#define TEMPERATURE_IDX 0
+#define HUMIDITY_IDX    1
+
+#define WRITE_OP  1
+#define NOTIFY_OP 2
+
+
 void startAdv(void);
-void setupES(void);
+void setupESS(void);
 void disconnect_callback(uint16_t conn_handle, uint8_t reason);
 void connect_callback(uint16_t conn_handle);
 void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_value);
@@ -39,36 +46,36 @@ BLECharacteristic tmpc = BLECharacteristic(UUID16_CHR_TEMPERATURE);
 // GATT Characteristic and Object Type 0x2A6F Humidity
 BLECharacteristic humc = BLECharacteristic(UUID16_CHR_HUMIDITY);
 
+bool start_notify[2] = {false, false};
 int16_t temperature = -10;
 uint16_t humidity = 52;
 
-void updateESMeasure(uint8_t op) {
+void updateCharacteristicMeasure(BLECharacteristic* chr, uint8_t op, uint8_t *data, uint8_t n) {
+    if (op == WRITE_OP) {
+        chr->write(data, n);
+    }
+    else if (op == NOTIFY_OP) {
+        if (!chr->notify(data, n)) {
+            Serial.print("ERR: Notify not set in CCCD or not connected! ");
+            uint16_t uuid;
+            chr->uuid.get(&uuid);
+            Serial.println(uuid, HEX);
+        }
+    }
+}
+
+void updateChTemperature(uint8_t op) {
     // Temperature and Humidity measures have factor multiplied by 0.01
     // by the characteristic, and so we multiply it by 100
     int16_t temp = temperature * 100;
+    updateCharacteristicMeasure(&tmpc, op, (uint8_t *) &temp, sizeof(temp));
+}
+
+void updateChHumidity(uint8_t op) {
+    // Temperature and Humidity measures have factor multiplied by 0.01
+    // by the characteristic, and so we multiply it by 100
     uint16_t hum = humidity * 100;
-    uint8_t *tp = (uint8_t *) &temp;
-    uint8_t *hp = (uint8_t *) &hum;
-    if (op == 1) {
-        tmpc.write(tp, sizeof(temp));
-        humc.write(hp, sizeof(hum));
-    }
-    else if (op == 2) {
-        if (tmpc.notify(tp, sizeof(temp))) {
-            Serial.print("Temperature Measurement updated to: ");
-            Serial.println(temp);
-        }
-        else {
-            Serial.println("ERROR: Notify not set in CCCD or not connected!");
-        }
-        if (humc.notify(hp, sizeof(hum))) {
-            Serial.print("Humidity Measurement updated to: ");
-            Serial.println(hum);
-        }
-        else {
-            Serial.println("ERROR: Notify not set in CCCD or not connected!");
-        }
-    }
+    updateCharacteristicMeasure(&humc, op, (uint8_t *) &hum, sizeof(hum));
 }
 
 void setup()
@@ -88,7 +95,7 @@ void setup()
 
     // BLEService and BLECharacteristic classes
     Serial.println("Configuring the Environmental Sensing Service");
-    setupES();
+    setupESS();
 
     // Setup the advertising packet(s)
     Serial.println("Setting up the advertising payload(s)");
@@ -100,13 +107,27 @@ void setup()
 void startAdv(void)
 {
     Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
-    Bluefruit.Advertising.addTxPower();
-
+    //Bluefruit.Advertising.addTxPower();
     Bluefruit.Advertising.addService(ess);
 
-    // Include Name
-    Bluefruit.Advertising.addName();
+    // Add Advertising Service Data for Temperature
+    uint8_t uuidlow = (uint8_t) UUID16_CHR_TEMPERATURE;
+    uint8_t uuidhigh = (uint8_t) (UUID16_CHR_TEMPERATURE >> 8);
+    uint8_t sdatat[4] = {uuidlow, uuidhigh, 0x44, 0xfd};
+    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA, &sdatat, 4);
 
+    // Add Advertising Service Data for Humidity
+    uuidlow = (uint8_t) UUID16_CHR_HUMIDITY;
+    uuidhigh = (uint8_t) (UUID16_CHR_HUMIDITY >> 8);
+    uint8_t sdatah[4] = {uuidlow, uuidhigh, 0xc4, 0x22};
+    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA, &sdatah, 4);
+
+    uuidlow = (uint8_t) UUID16_CHR_CO_PPM;
+    uuidhigh = (uint8_t) (UUID16_CHR_CO_PPM >> 8);
+    uint8_t sdatac[4] = {uuidlow, uuidhigh, 0x90, 0x55};
+    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA, &sdatac, 4);
+
+    Bluefruit.Advertising.addName();
     /* Start Advertising
        - Enable auto advertising if disconnected
        - Timeout for fast mode is 30 seconds
@@ -124,7 +145,7 @@ void startAdv(void)
     Bluefruit.Advertising.start(0);                // 0 = Don't stop advertising after n seconds
 }
 
-void setupES(void)
+void setupESS(void)
 {
     ess.begin();
 
@@ -145,7 +166,8 @@ void setupES(void)
     if (humc.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &esm_desc, sizeof(esm_desc))) {
         Serial.println("Error addDescriptor call");
     }
-    updateESMeasure(1);
+    updateChTemperature(WRITE_OP);
+    updateChHumidity(WRITE_OP);
 }
 
 void connect_callback(uint16_t conn_handle)
@@ -180,9 +202,9 @@ void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_valu
 {
     // Display the raw request packet
     Serial.print("CCCD Updated: ");
-    //Serial.printBuffer(request->data, request->len);
     Serial.print(cccd_value);
     Serial.println("");
+    uint8_t idx = TEMPERATURE_IDX;
 
     // Check the characteristic this CCCD update is associated with in case
     // this handler is used for multiple CCCD records.
@@ -190,11 +212,16 @@ void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_valu
         Serial.print("Temperature Characteristic ");
     }
     else if (chr->uuid == humc.uuid) {
+        idx = HUMIDITY_IDX;
         Serial.print("Humidity Characteristic ");
     }
     if (chr->notifyEnabled(conn_hdl)) {
+        // Start incrementing the measurement
+        start_notify[idx] = true;
         Serial.println("'Notify' enabled");
     } else {
+        // Stop incrementing the measurement
+        start_notify[idx] = false;
         Serial.println("'Notify' disabled");
     }
 }
@@ -202,9 +229,14 @@ void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_valu
 void loop()
 {
     if ( Bluefruit.connected() ) {
-        temperature++;
-        humidity++;
-        updateESMeasure(2);
+        if (start_notify[TEMPERATURE_IDX]) {
+            updateChTemperature(NOTIFY_OP);
+            temperature++;
+        }
+        if (start_notify[HUMIDITY_IDX]) {
+            updateChHumidity(NOTIFY_OP);
+            humidity++;
+        }
     }
     delay(1000);
 }
