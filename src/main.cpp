@@ -12,6 +12,11 @@
   any redistribution
  *********************************************************************/
 #include <bluefruit.h>
+#ifdef SCD30
+#include <Adafruit_SCD30.h>
+// Sensor SCD30
+Adafruit_SCD30  scd30;
+#endif
 
 // Beacon uses the Manufacturer Specific Data field in the advertising
 // packet, which means you must provide a valid Manufacturer ID. Update
@@ -28,6 +33,7 @@
 
 #define TEMPERATURE_IDX 0
 #define HUMIDITY_IDX    1
+#define CO2_IDX         2
 
 #define WRITE_OP  1
 #define NOTIFY_OP 2
@@ -45,10 +51,13 @@ BLEService        ess = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
 BLECharacteristic tmpc = BLECharacteristic(UUID16_CHR_TEMPERATURE);
 // GATT Characteristic and Object Type 0x2A6F Humidity
 BLECharacteristic humc = BLECharacteristic(UUID16_CHR_HUMIDITY);
+// GATT Characteristic and Object Type 0x2BD0 CO concentration
+BLECharacteristic co2c = BLECharacteristic(UUID16_CHR_POLLEN_CONCENTRATION);
 
-bool start_notify[2] = {false, false};
-int16_t temperature = -10;
-uint16_t humidity = 52;
+bool start_notify[3] = {false, false, false};
+int16_t temperature = 0;
+uint16_t humidity = 0;
+uint32_t co2ppm = 0;
 
 void updateCharacteristicMeasure(BLECharacteristic* chr, uint8_t op, uint8_t *data, uint8_t n) {
     if (op == WRITE_OP) {
@@ -78,14 +87,33 @@ void updateChHumidity(uint8_t op) {
     updateCharacteristicMeasure(&humc, op, (uint8_t *) &hum, sizeof(hum));
 }
 
+void updateChCO2(uint8_t op) {
+    updateCharacteristicMeasure(&co2c, op, (uint8_t *) &co2ppm, sizeof(co2ppm)-1);
+}
+
 void setup()
 {
     Serial.begin(115200);
 
-    while ( !Serial ) delay(10);
+    // while ( !Serial ) delay(10);
 
-    Serial.println("\nBluefruit52 GATT ESS Example");
+    Serial.println("\nBluefruit52 GATT ESS");
     Serial.println("--------------------------");
+
+#ifdef SCD30
+    if (!scd30.begin()) {
+        Serial.println("Failed to find SCD30 chip");
+        while (1) { delay(10); }
+    }
+    Serial.println("SCD30 Found!");
+    // if (!scd30.setMeasurementInterval(10)){
+    //   Serial.println("Failed to set measurement interval");
+    //   while(1){ delay(10);}
+    // }
+    Serial.print("Measurement Interval: ");
+    Serial.print(scd30.getMeasurementInterval());
+    Serial.println(" seconds");
+#endif
 
     Bluefruit.begin();
 
@@ -122,10 +150,10 @@ void startAdv(void)
     uint8_t sdatah[4] = {uuidlow, uuidhigh, 0xc4, 0x22};
     Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA, &sdatah, 4);
 
-    uuidlow = (uint8_t) UUID16_CHR_CO_PPM;
-    uuidhigh = (uint8_t) (UUID16_CHR_CO_PPM >> 8);
-    uint8_t sdatac[4] = {uuidlow, uuidhigh, 0x90, 0x55};
-    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA, &sdatac, 4);
+    uuidlow = (uint8_t) UUID16_CHR_POLLEN_CONCENTRATION;
+    uuidhigh = (uint8_t) (UUID16_CHR_POLLEN_CONCENTRATION >> 8);
+    uint8_t sdatac[5] = {uuidlow, uuidhigh, 0x90, 0x55, 0x01};
+    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA, &sdatac, sizeof(sdatac));
 
     Bluefruit.Advertising.addName();
     /* Start Advertising
@@ -166,8 +194,18 @@ void setupESS(void)
     if (humc.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &esm_desc, sizeof(esm_desc))) {
         Serial.println("Error addDescriptor call");
     }
+
+    co2c.setProperties(CHR_PROPS_NOTIFY);
+    co2c.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    co2c.setCccdWriteCallback(cccd_callback);
+    co2c.begin();
+    if (co2c.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &esm_desc, sizeof(esm_desc))) {
+        Serial.println("Error addDescriptor call");
+    }
+    
     updateChTemperature(WRITE_OP);
     updateChHumidity(WRITE_OP);
+    updateChCO2(WRITE_OP);
 }
 
 void connect_callback(uint16_t conn_handle)
@@ -215,6 +253,10 @@ void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_valu
         idx = HUMIDITY_IDX;
         Serial.print("Humidity Characteristic ");
     }
+    else if (chr->uuid == co2c.uuid) {
+        idx = CO2_IDX;
+        Serial.print("Humidity Characteristic ");
+    }
     if (chr->notifyEnabled(conn_hdl)) {
         // Start incrementing the measurement
         start_notify[idx] = true;
@@ -228,16 +270,40 @@ void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_valu
 
 void loop()
 {
-    if ( Bluefruit.connected() ) {
-        if (start_notify[TEMPERATURE_IDX]) {
-            updateChTemperature(NOTIFY_OP);
-            temperature++;
-        }
-        if (start_notify[HUMIDITY_IDX]) {
-            updateChHumidity(NOTIFY_OP);
-            humidity++;
+#ifdef SCD30
+    if (scd30.dataReady()){
+        if (scd30.read()){
+            temperature = (int16_t) (scd30.temperature + 0.5);
+            humidity = (uint16_t) (scd30.relative_humidity + 0.5);
+            co2ppm = (uint32_t) (scd30.CO2 + 0.5);
+            Serial.print("Temperature: ");
+            Serial.print(temperature);
+            Serial.print(" C | Humidity: ");
+            Serial.print(humidity);
+            Serial.print(" % | CO2: ");
+            Serial.print(co2ppm);
+            Serial.println(" ppm");
+            Serial.println("");
+#endif
+            if ( Bluefruit.connected() ) {
+                if (start_notify[TEMPERATURE_IDX]) {
+                    updateChTemperature(NOTIFY_OP);
+                    // temperature++;
+                }
+                if (start_notify[HUMIDITY_IDX]) {
+                    updateChHumidity(NOTIFY_OP);
+                    // humidity++;
+                }
+                if (start_notify[CO2_IDX]) {
+                    updateChCO2(NOTIFY_OP);
+                }
+            }
+#ifdef SCD30
+        } else {
+            Serial.println("Read error!");
         }
     }
-    delay(1000);
+#endif
+    delay(2000);
 }
 
