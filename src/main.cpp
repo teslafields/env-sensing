@@ -1,22 +1,9 @@
-/*********************************************************************
-  This is an example for our nRF52 based Bluefruit LE modules
-
-  Pick one up today in the adafruit shop!
-
-  Adafruit invests time and resources providing this open source code,
-  please support Adafruit and open-source hardware by purchasing
-  products from Adafruit!
-
-  MIT license, check LICENSE for more information
-  All text above, and the splash screen below must be included in
-  any redistribution
- *********************************************************************/
 #include <bluefruit.h>
 #ifdef SCD30
 #include <Adafruit_SCD30.h>
-// Sensor SCD30
 Adafruit_SCD30  scd30;
 #endif
+#include "battery.h"
 
 // UUID Characteristc Descriptor for Environment Sensing Measurement
 #define UUID_CHR_DESCRIPTOR_ES_MEAS  0x290C
@@ -40,19 +27,22 @@ typedef enum CtrlIdx {
     TEMPIDX,
     HUMDIDX,
     CO2CIDX,
+    VBATIDX,
     ENDIDX,
 } controlIdx;
 
-bool start_notify[ENDIDX] = {false, false, false};
+bool start_notify[ENDIDX] = {false};
 uint16_t ess_chr_uuid[ENDIDX] = {
     UUID16_CHR_TEMPERATURE, // 0x2A6E
     UUID16_CHR_HUMIDITY, // 0x2A6F
     UUID16_CHR_POLLEN_CONCENTRATION, // 0x2A75 (0x2BD0)
+    UUID16_CHR_BATTERY_LEVEL // 0x2A19
 };
 int16_t ess_chr_gain[ENDIDX] = {
     100, // Temperature multiplier factor
     100, // Humidity factor
     1, // CO2 factor
+    1, // Batter level factor
     // More information about this is found at GATT spec
 };
 
@@ -65,6 +55,7 @@ BLECharacteristic ess_chr[ENDIDX] = {
     BLECharacteristic(UUID16_CHR_TEMPERATURE),
     BLECharacteristic(UUID16_CHR_HUMIDITY),
     BLECharacteristic(UUID16_CHR_POLLEN_CONCENTRATION),
+    BLECharacteristic(UUID16_CHR_BATTERY_LEVEL),
 };
 // Environmental Sensing Service is 0x181A
 BLEService ess = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
@@ -72,6 +63,7 @@ BLEService ess = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
 int16_t temperature = 0;
 uint16_t humidity = 0;
 uint32_t co2ppm = 0;
+uint8_t vbatlv = 0;
 
 void startAdv(void);
 void setupESS(void);
@@ -203,6 +195,7 @@ void setupESS(void)
     updateCharacteristic(TEMPIDX, WRITE_OP, (int32_t) temperature, sizeof(temperature));
     updateCharacteristic(HUMDIDX, WRITE_OP, (int32_t) humidity, sizeof(humidity));
     updateCharacteristic(CO2CIDX, WRITE_OP, (int32_t) co2ppm, sizeof(co2ppm)-1);
+    updateCharacteristic(VBATIDX, WRITE_OP, (int32_t) vbatlv, sizeof(vbatlv));
 }
 
 void adv_stop_callback(void) {
@@ -253,7 +246,11 @@ void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_valu
     }
     else if (chr->uuid == ess_chr[CO2CIDX].uuid) {
         idx = CO2CIDX;
-        Serial.print("Humidity Characteristic ");
+        Serial.print("CO2 Characteristic ");
+    }
+    else if (chr->uuid == ess_chr[VBATIDX].uuid) {
+        idx = VBATIDX;
+        Serial.print("Battery Level Characteristic ");
     }
 
     if (chr->notifyEnabled(conn_hdl)) {
@@ -267,6 +264,10 @@ void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_valu
 
 void loop()
 {
+    float vbat_mv = readVBAT();
+    // Convert from raw mv to percentage (based on LIPO chemistry)
+    uint8_t vbat_per = mvToPercent(vbat_mv);
+
 #ifdef SCD30
     if (scd30.dataReady()){
         if (scd30.read()){
@@ -279,8 +280,11 @@ void loop()
             Serial.print(humidity);
             Serial.print(" % | CO2: ");
             Serial.print(co2ppm);
-            Serial.println(" ppm");
-            Serial.println("");
+            Serial.print(" ppm | Battery: ");
+            Serial.print(vbat_mv);
+            Serial.print(" mV ");
+            Serial.print(vbat_per);
+            Serial.println(" %");
 #endif
             if ( Bluefruit.connected() ) {
                 if (start_notify[TEMPIDX]) {
@@ -291,6 +295,10 @@ void loop()
                 }
                 if (start_notify[CO2CIDX]) {
                     updateCharacteristic(CO2CIDX, NOTIFY_OP, (int32_t) co2ppm, sizeof(co2ppm)-1);
+                }
+                if (start_notify[VBATIDX]) {
+                    vbatlv++;
+                    updateCharacteristic(VBATIDX, NOTIFY_OP, (int32_t) vbat_per, sizeof(vbat_per));
                 }
             }
 #ifdef SCD30
