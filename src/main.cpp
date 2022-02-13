@@ -1,9 +1,9 @@
-#include <bluefruit.h>
 #ifdef SCD30
 #include <Adafruit_SCD30.h>
 Adafruit_SCD30  scd30;
 #endif
 #include "battery.h"
+#include "envsensing.h"
 
 // UUID Characteristc Descriptor for Environment Sensing Measurement
 #define UUID_CHR_DESCRIPTOR_ES_MEAS  0x290C
@@ -64,6 +64,11 @@ int16_t temperature = 0;
 uint16_t humidity = 0;
 uint32_t co2ppm = 0;
 uint8_t vbatlv = 0;
+
+EnvSensingChr<int16_t>  temperatureChr(UUID16_CHR_TEMPERATURE, 100);
+EnvSensingChr<uint16_t> humidityChr(UUID16_CHR_HUMIDITY, 100);
+EnvSensingChr<uint32_t> co2ppmChr(UUID16_CHR_POLLEN_CONCENTRATION, 1);
+EnvSensingChr<uint8_t> vbatlvChr(UUID16_CHR_BATTERY_LEVEL, 1);
 
 void startAdv(void);
 void setupESS(void);

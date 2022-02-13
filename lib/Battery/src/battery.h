@@ -1,5 +1,5 @@
-#ifndef __BATTERY_H__
-#define __BATTERY_H__
+#ifndef BATTERY_H
+#define BATTERY_H
 
 #include <Arduino.h>
 
