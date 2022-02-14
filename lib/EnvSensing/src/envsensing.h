@@ -9,12 +9,13 @@ class EnvSensingChr
   private:
     T _data;
     uint16_t _gain;
-    BLECharacteristic _chr;
 
   public:
     EnvSensingChr(uint16_t uuid, uint16_t gain);
     T getData();
+    T getDataGain();
     void setData(T data);
+    BLECharacteristic chr;
 };
 #endif
 

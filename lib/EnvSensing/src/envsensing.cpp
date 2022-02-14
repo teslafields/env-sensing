@@ -4,12 +4,17 @@ template <class T>
 EnvSensingChr<T>::EnvSensingChr(uint16_t uuid, uint16_t gain) {
     _data = 0;
     _gain = gain;
-    _chr = BLECharacteristic(uuid);
+    chr = BLECharacteristic(uuid);
 }
 
 template <class T>
 T EnvSensingChr<T>::getData(void) {
     return _data;
+}
+
+template <class T>
+T EnvSensingChr<T>::getDataGain(void) {
+    return _data * _gain;
 }
 
 template <class T>

@@ -77,7 +77,7 @@ void disconnect_callback(uint16_t conn_handle, uint8_t reason);
 void connect_callback(uint16_t conn_handle);
 void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_value);
 
-
+/*
 void updateCharacteristic(controlIdx idx, uint8_t op, int32_t value, uint8_t n) {
     if (idx >= ENDIDX)
         return;
@@ -89,6 +89,20 @@ void updateCharacteristic(controlIdx idx, uint8_t op, int32_t value, uint8_t n) 
     }
     else if (op == NOTIFY_OP) {
         if (!chr->notify(data, n)) {
+            uint16_t uuid;
+            chr->uuid.get(&uuid);
+            Serial.print("ERR: Notify not set in CCCD or not connected! ");
+            Serial.println(uuid, HEX);
+        }
+    }
+}
+*/
+void updateCharacteristic(BLECharacteristic* chr, uint8_t op, uint8_t *d_ptr, uint8_t n) {
+    if (op == WRITE_OP) {
+        chr->write(d_ptr, n);
+    }
+    else if (op == NOTIFY_OP) {
+        if (!chr->notify(d_ptr, n)) {
             uint16_t uuid;
             chr->uuid.get(&uuid);
             Serial.print("ERR: Notify not set in CCCD or not connected! ");
@@ -186,7 +200,7 @@ void setupESS(void)
     ess.begin();
     // Descriptor of ESS
     uint8_t esm_desc[11] = { 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00 }; 
-
+    /*
     for (int i = TEMPIDX; i < ENDIDX; i++) {
         ess_chr[i].setProperties(CHR_PROPS_NOTIFY);
         ess_chr[i].setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
@@ -196,11 +210,44 @@ void setupESS(void)
             Serial.println("Error addDescriptor call");
         }
     }
+    */
+    temperatureChr.chr.setProperties(CHR_PROPS_NOTIFY);
+    temperatureChr.chr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    temperatureChr.chr.setCccdWriteCallback(cccd_callback);
+    temperatureChr.chr.begin();
+    temperatureChr.chr.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &esm_desc, sizeof(esm_desc));
+
+    humidityChr.chr.setProperties(CHR_PROPS_NOTIFY);
+    humidityChr.chr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    humidityChr.chr.setCccdWriteCallback(cccd_callback);
+    humidityChr.chr.begin();
+    humidityChr.chr.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &esm_desc, sizeof(esm_desc));
+
+    co2ppmChr.chr.setProperties(CHR_PROPS_NOTIFY);
+    co2ppmChr.chr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    co2ppmChr.chr.setCccdWriteCallback(cccd_callback);
+    co2ppmChr.chr.begin();
+    co2ppmChr.chr.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &esm_desc, sizeof(esm_desc));
+
+    vbatlvChr.chr.setProperties(CHR_PROPS_NOTIFY);
+    vbatlvChr.chr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    vbatlvChr.chr.setCccdWriteCallback(cccd_callback);
+    vbatlvChr.chr.begin();
+    vbatlvChr.chr.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &esm_desc, sizeof(esm_desc));
+
+    int16_t tempval = temperatureChr.getDataGain();
+    updateCharacteristic(&temperatureChr.chr, WRITE_OP, (uint8_t *) &tempval, 2);
+
+    /*
+    updateCharacteristic(&humidityChr.chr, WRITE_OP, (int32_t) humidity, sizeof(humidity));
+    updateCharacteristic(&co2ppmChr.chr, WRITE_OP, (int32_t) co2ppm, sizeof(co2ppm)-1);
+    updateCharacteristic(&vbatlvChr.chr, WRITE_OP, (int32_t) vbatlv, sizeof(vbatlv));
 
     updateCharacteristic(TEMPIDX, WRITE_OP, (int32_t) temperature, sizeof(temperature));
     updateCharacteristic(HUMDIDX, WRITE_OP, (int32_t) humidity, sizeof(humidity));
     updateCharacteristic(CO2CIDX, WRITE_OP, (int32_t) co2ppm, sizeof(co2ppm)-1);
     updateCharacteristic(VBATIDX, WRITE_OP, (int32_t) vbatlv, sizeof(vbatlv));
+    */
 }
 
 void adv_stop_callback(void) {
@@ -293,8 +340,12 @@ void loop()
 #endif
             if ( Bluefruit.connected() ) {
                 if (start_notify[TEMPIDX]) {
-                    updateCharacteristic(TEMPIDX, NOTIFY_OP, (int32_t) temperature, sizeof(temperature));
+                    temperatureChr.setData(temperature);
+                    int16_t tempval = temperatureChr.getDataGain();
+                    updateCharacteristic(&temperatureChr.chr, NOTIFY_OP, (uint8_t *) &tempval, 2);
+                    // updateCharacteristic(TEMPIDX, NOTIFY_OP, (int32_t) temperature, sizeof(temperature));
                 }
+                /*
                 if (start_notify[HUMDIDX]) {
                     updateCharacteristic(HUMDIDX, NOTIFY_OP, (int32_t) humidity, sizeof(humidity));
                 }
@@ -305,6 +356,7 @@ void loop()
                     vbatlv++;
                     updateCharacteristic(VBATIDX, NOTIFY_OP, (int32_t) vbat_per, sizeof(vbat_per));
                 }
+                */
             }
 #ifdef SCD30
         } else {
