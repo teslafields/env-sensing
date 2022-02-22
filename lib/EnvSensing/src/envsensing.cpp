@@ -39,7 +39,7 @@ void EnvSensingSvc::setup(void) {
     setupChr(&batlv.chr);
 }
 
-typedef void (EnvSensingSvc::*write_cccd_cb) (uint16_t conn_hdl,
+typedef void (*write_cccd_cb) (uint16_t conn_hdl,
         BLECharacteristic* chr, uint16_t value);
 
 void EnvSensingSvc::setupChr(BLECharacteristic *chr) {
