@@ -1,14 +1,15 @@
 #include "envsensing.h"
+#include "battery.h"
 
-
-
+/*
 template <class T>
-EnvSensingChr<T>::EnvSensingChr(uint16_t uuid, uint16_t gain) {
+EnvSensingChr<T>::config(uint16_t uuid, uint16_t gain, int8_t offset) {
     _data = 0;
     _gain = gain;
+    _offset = offset;
     chr = BLECharacteristic(uuid);
 }
-
+*/
 template <class T>
 T EnvSensingChr<T>::getData(void) {
     return _data;
@@ -24,47 +25,57 @@ void EnvSensingChr<T>::setData(T data) {
     _data = data;
 }
 
+template <class T>
+void EnvSensingChr<T>::setup(uint16_t uuid, uint16_t gain, int8_t offset) {
+    _data = 0;
+    _gain = gain;
+    _offset = offset;
+    chr.setProperties(CHR_PROPS_NOTIFY);
+    chr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    chr.setCccdWriteCallback(&EnvSensingChr<T>::cccdWriteCallback);
+    chr.begin();
+    chr.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &envSensingDesc,
+            ES_MEAS_DESCR_SIZE);
+}
+
+template <class T>
+void EnvSensingChr<T>::cccdWriteCallback(uint16_t conn_hdl,
+        BLECharacteristic* chr, uint16_t cccd_value) {
+    // Check if notify was enabled
+    if (chr->notifyEnabled(conn_hdl)) {
+        _state = NOTIFY;
+    } else {
+        _state = NONE;
+    }
+}
+
+template <class T>
+void EnvSensingChr<T>::update(void) {
+    switch (_state) {
+        case NOTIFY:
+            chr.notify((uint8_t *) &_data, sizeof(_data) + _offset);
+            break;
+        case WRITE:
+            chr.write((uint8_t *) &_data, sizeof(_data) + _offset);
+            break;
+        default:
+            break;
+    }
+}
+
 /* Force compile to those types */
-template class EnvSensingChr<uint8_t>;
-template class EnvSensingChr<uint16_t>;
-template class EnvSensingChr<int16_t>;
-template class EnvSensingChr<uint32_t>;
+//template class EnvSensingChr<uint8_t>;
+//template class EnvSensingChr<uint16_t>;
+//template class EnvSensingChr<int16_t>;
+//template class EnvSensingChr<uint32_t>;
 
 void EnvSensingSvc::setup(void) {
     _svc = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
     _svc.begin();
-    setupChr(&temp.chr);
-    setupChr(&humid.chr);
-    setupChr(&co2lv.chr);
-    setupChr(&batlv.chr);
-}
-
-typedef void (*write_cccd_cb) (uint16_t conn_hdl,
-        BLECharacteristic* chr, uint16_t value);
-
-void EnvSensingSvc::setupChr(BLECharacteristic *chr) {
-    write_cccd_cb cb = &EnvSensingSvc::cccdWriteCallback;
-    chr->setProperties(CHR_PROPS_NOTIFY);
-    chr->setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
-    chr->setCccdWriteCallback(cb);
-    chr->begin();
-    chr->addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &envSensingDesc,
-            ES_MEAS_DESCR_SIZE);
-}
-
-void EnvSensingSvc::updateChr(BLECharacteristic* chr,
-        uint8_t op, uint8_t *d_ptr, uint8_t n) {
-    if (op == WRITE_OP) {
-        chr->write(d_ptr, n);
-    }
-    else if (op == NOTIFY_OP) {
-        if (!chr->notify(d_ptr, n)) {
-            uint16_t uuid;
-            chr->uuid.get(&uuid);
-            Serial.print("ERR: Notify not set in CCCD or not connected! ");
-            Serial.println(uuid, HEX);
-        }
-    }
+    temp.setup(UUID16_CHR_TEMPERATURE, 100, 0);
+    humid.setup(UUID16_CHR_HUMIDITY, 100, 0);
+    co2lv.setup(UUID16_CHR_POLLEN_CONCENTRATION, 1, -1);
+    batlv.setup(UUID16_CHR_BATTERY_LEVEL, 1, 0);
 }
 
 void EnvSensingSvc::updateMeasurements(int16_t t, uint16_t h,
@@ -75,28 +86,27 @@ void EnvSensingSvc::updateMeasurements(int16_t t, uint16_t h,
     batlv.setData(b);
 }
 
-void EnvSensingSvc::cccdWriteCallback(uint16_t conn_hdl,
-        BLECharacteristic* chr, uint16_t cccd_value) {
+void EnvSensingSvc::service(void) {
+    float vbat_mv = readVBAT();
+    // Convert from raw mv to percentage (based on LIPO chemistry)
+    uint8_t vbat_per = mvToPercent(vbat_mv);
 
-    if (chr->uuid == temp.chr.uuid) {
-        Serial.print("Temperature Characteristic ");
+    if (scd30.dataReady()) {
+        if (scd30.read()) {
+            temp.setData((int16_t) (scd30.temperature + 0.5));
+            humid.setData((uint16_t) (scd30.relative_humidity + 0.5));
+            co2lv.setData((uint32_t) (scd30.CO2 + 0.5));
+        }
     }
-    else if (chr->uuid == humid.chr.uuid) {
-        Serial.print("Humidity Characteristic ");
-    }
-    else if (chr->uuid == co2lv.chr.uuid) {
-        Serial.print("CO2 Characteristic ");
-    }
-    else if (chr->uuid == batlv.chr.uuid) {
-        Serial.print("Battery Level Characteristic ");
-    }
-
-    // Check if notify was enabled for the given characteristic
-    if (chr->notifyEnabled(conn_hdl)) {
-        Serial.println("'Notify' enabled");
-    } else {
-        Serial.println("'Notify' disabled");
-    }
+    Serial.print("Temperature: ");
+    Serial.print(temp.getData());
+    Serial.print(" C | Humidity: ");
+    Serial.print(humid.getData());
+    Serial.print(" % | CO2: ");
+    Serial.print(co2lv.getData());
+    Serial.print(" ppm | Battery: ");
+    Serial.print(vbat_mv);
+    Serial.print(" mV ");
+    Serial.print(vbat_per);
+    Serial.println(" %");
 }
-
-

@@ -65,10 +65,12 @@ uint16_t humidity = 0;
 uint32_t co2ppm = 0;
 uint8_t vbatlv = 0;
 
+/*
 EnvSensingChr<int16_t>  temperatureChr(UUID16_CHR_TEMPERATURE, 100);
 EnvSensingChr<uint16_t> humidityChr(UUID16_CHR_HUMIDITY, 100);
 EnvSensingChr<uint32_t> co2ppmChr(UUID16_CHR_POLLEN_CONCENTRATION, 1);
 EnvSensingChr<uint8_t> vbatlvChr(UUID16_CHR_BATTERY_LEVEL, 1);
+*/
 
 void startAdv(void);
 void setupESS(void);
@@ -210,7 +212,7 @@ void setupESS(void)
             Serial.println("Error addDescriptor call");
         }
     }
-    */
+
     temperatureChr.chr.setProperties(CHR_PROPS_NOTIFY);
     temperatureChr.chr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
     temperatureChr.chr.setCccdWriteCallback(cccd_callback);
@@ -238,7 +240,7 @@ void setupESS(void)
     int16_t tempval = temperatureChr.getDataGain();
     updateCharacteristic(&temperatureChr.chr, WRITE_OP, (uint8_t *) &tempval, 2);
 
-    /*
+
     updateCharacteristic(&humidityChr.chr, WRITE_OP, (int32_t) humidity, sizeof(humidity));
     updateCharacteristic(&co2ppmChr.chr, WRITE_OP, (int32_t) co2ppm, sizeof(co2ppm)-1);
     updateCharacteristic(&vbatlvChr.chr, WRITE_OP, (int32_t) vbatlv, sizeof(vbatlv));
@@ -339,13 +341,14 @@ void loop()
             Serial.println(" %");
 #endif
             if ( Bluefruit.connected() ) {
+                /*
                 if (start_notify[TEMPIDX]) {
                     temperatureChr.setData(temperature);
                     int16_t tempval = temperatureChr.getDataGain();
                     updateCharacteristic(&temperatureChr.chr, NOTIFY_OP, (uint8_t *) &tempval, 2);
                     // updateCharacteristic(TEMPIDX, NOTIFY_OP, (int32_t) temperature, sizeof(temperature));
                 }
-                /*
+
                 if (start_notify[HUMDIDX]) {
                     updateCharacteristic(HUMDIDX, NOTIFY_OP, (int32_t) humidity, sizeof(humidity));
                 }
