@@ -26,10 +26,10 @@ typedef enum ChrSensingState {
 template <class T>
 class EnvSensingChr {
   private:
-    T _data;
-    int8_t _offset;
-    uint16_t _gain;
-    static chrSensingState _state;
+    T chrData;
+    int8_t dataOffset;
+    uint16_t dataGain;
+    static chrSensingState state;
     static BLECharacteristic chr;
     static void cccdWriteCallback(uint16_t conn_hdl,
             BLECharacteristic* chr, uint16_t cccd_value);
@@ -50,6 +50,7 @@ class EnvSensingSvc {
         EnvSensingChr<uint32_t> co2lv;
         EnvSensingChr<uint8_t>  batlv;
         /* Sensor SCD30 */
+        bool                    sensor_ok = false;
         Adafruit_SCD30          scd30;
     public:
         void service(void);
