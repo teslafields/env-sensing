@@ -138,6 +138,12 @@ void setup()
     Serial.print("Measurement Interval: ");
     Serial.print(scd30.getMeasurementInterval());
     Serial.println(" seconds");
+
+    if (!scd30.forceRecalibrationWithReference(400)){
+      Serial.println("Failed to force recalibration with reference");
+      while(1) { delay(10); }
+    }
+
 #endif
 
     Bluefruit.begin();
