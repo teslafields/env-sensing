@@ -31,7 +31,6 @@ typedef enum CtrlIdx {
     ENDIDX,
 } controlIdx;
 
-bool start_notify[ENDIDX] = {false};
 uint16_t ess_chr_uuid[ENDIDX] = {
     UUID16_CHR_TEMPERATURE, // 0x2A6E
     UUID16_CHR_HUMIDITY, // 0x2A6F
@@ -62,59 +61,23 @@ uint8_t vbatlv = 0;
 
 void startAdv(void);
 void adv_stop_callback(void);
-void disconnect_callback(uint16_t conn_handle, uint8_t reason);
-void connect_callback(uint16_t conn_handle);
 
-
-void updateAdvertisingData(controlIdx idx, int32_t value, uint8_t n) {
-    if (idx >= ENDIDX)
-        return;
-    uint16_t uuid = ess_chr_uuid[idx];
-    uint8_t uuidlow = (uint8_t) uuid & 0xff;
-    uint8_t uuidhigh = (uint8_t) (uuid >> 8) & 0xff;
-    uint8_t svc_uuid[ADV_SVC_DATA_LEN] = {0};
-    svc_uuid[0] = uuidlow;
-    svc_uuid[1] = uuidhigh;
-    value *= ess_chr_gain[idx];
-    uint8_t* data = (uint8_t *) &value;
-    n = n > ADV_SVC_DATA_LEN - 2 ? ADV_SVC_DATA_LEN : n + 2;
-    for (int i = 2; i < n; i++) {
-        svc_uuid[i] = *data;
-        data++;
-    }
-    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA, &svc_uuid, n);
-}
 
 void setup()
 {
     Serial.begin(115200);
 
+    pinMode(PIN_BUTTON1, INPUT);
     // while ( !Serial ) delay(10);
 
     Serial.println("\nBluefruit52 GATT ESS");
     Serial.println("--------------------------");
 
-    /*
-#ifdef SCD30
-    if (!scd30.begin()) {
-        Serial.println("Failed to find SCD30 chip");
-        while (1) { delay(10); }
-    }
-    Serial.println("SCD30 Found!");
-    // if (!scd30.setMeasurementInterval(10)){
-    //   Serial.println("Failed to set measurement interval");
-    //   while(1){ delay(10);}
-    // }
-    Serial.print("Measurement Interval: ");
-    Serial.print(scd30.getMeasurementInterval());
-    Serial.println(" seconds");
-#endif
-    */
     Bluefruit.begin();
 
     // Set the connect/disconnect callback handlers
-    Bluefruit.Periph.setConnectCallback(connect_callback);
-    Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
+    Bluefruit.Periph.setConnectCallback(&EnvSensingSvc::connectCallback);
+    Bluefruit.Periph.setDisconnectCallback(&EnvSensingSvc::disconnectCallback);
 
     // BLEService and BLECharacteristic classes
     Serial.println("Configuring the Environmental Sensing Service");
@@ -130,13 +93,8 @@ void setup()
 void startAdv(void)
 {
     Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
-
-
-    updateAdvertisingData(TEMPIDX, (int32_t) temperature, sizeof(temperature));
-    updateAdvertisingData(HUMDIDX, (int32_t) humidity, sizeof(humidity));
-    updateAdvertisingData(CO2CIDX, (int32_t) co2ppm, sizeof(co2ppm)-2); // lets send the 4 bytes
-
-    Bluefruit.ScanResponse.addName();
+    Bluefruit.Advertising.addService(ess.getBLEService());
+    Bluefruit.Advertising.addName();
     /* Start Advertising
        - Enable auto advertising if disconnected
        - Timeout for fast mode is 30 seconds
@@ -156,37 +114,22 @@ void adv_stop_callback(void) {
     startAdv();
 }
 
-void connect_callback(uint16_t conn_handle)
-{
-    // Get the reference to current connection
-    BLEConnection* connection = Bluefruit.Connection(conn_handle);
-
-    char central_name[32] = { 0 };
-    connection->getPeerName(central_name, sizeof(central_name));
-
-    Serial.print("Connected to ");
-    Serial.println(central_name);
-    digitalWrite(1, LED_CONN);
-}
-
-/**
- * Callback invoked when a connection is dropped
- * @param conn_handle connection where this event happens
- * @param reason is a BLE_HCI_STATUS_CODE which can be found in ble_hci.h
- */
-void disconnect_callback(uint16_t conn_handle, uint8_t reason)
-{
-    (void) conn_handle;
-    (void) reason;
-
-    Serial.print("Disconnected, reason = 0x"); Serial.println(reason, HEX);
-    Serial.println("Advertising!");
-    digitalWrite(0, LED_CONN);
-}
-
+uint16_t ess_trigger_count = 0;
+bool entered_section = false;
 void loop()
 {
-    ess.service();
-    delay(2000);
+    if (ess_trigger_count >= 4) {
+        ess.service();
+        ess_trigger_count = 0;
+    } else {
+        ess_trigger_count++;
+    }
+    if (digitalRead(PIN_BUTTON1) == LOW && !entered_section) {
+        Serial.println("Button pressed!");
+        entered_section = true;
+    } else if (digitalRead(PIN_BUTTON1) == HIGH && entered_section) {
+        entered_section = false;
+    }
+    delay(500);
 }
 

@@ -29,21 +29,26 @@ class EnvSensingChr {
     T chrData;
     int8_t dataOffset;
     uint16_t dataGain;
-    static chrSensingState state;
-    static BLECharacteristic chr;
-    static void cccdWriteCallback(uint16_t conn_hdl,
-            BLECharacteristic* chr, uint16_t cccd_value);
+    chrSensingState state;
+    BLECharacteristic chr;
+    uint16_t connHdl;
+    bool writeFlagged = false;
+    //void cccdWriteCallback(uint16_t conn_hdl,
+    //        BLECharacteristic* chr, uint16_t cccd_value);
 
   public:
     T getData();
     T getDataGain();
     void setData(T data);
+    void setState(chrSensingState st);
+    void setConnectionHandle(uint16_t conn);
     void setup(uint16_t uuid, uint16_t gain, int8_t offset);
     void update(void);
 };
 
 class EnvSensingSvc {
     private:
+        static uint16_t         connHdl;
         BLEService              _svc;
         EnvSensingChr<int16_t>  temp;
         EnvSensingChr<uint16_t> humid;
@@ -55,8 +60,15 @@ class EnvSensingSvc {
     public:
         void service(void);
         void setup(void);
+        BLEService& getBLEService(void);
         void updateMeasurements(int16_t t, uint16_t h, uint32_t c, uint8_t b);
+        static void connectCallback(uint16_t conn_handle);
+        static void disconnectCallback(uint16_t conn_handle, uint8_t reason);
 };
+
+
+
+void cccdWriteCallback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_value);
 
 extern uint8_t envSensingDesc[];
 
