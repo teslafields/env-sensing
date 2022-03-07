@@ -96,17 +96,38 @@ template class EnvSensingChr<uint32_t>;
 
 uint16_t EnvSensingSvc::connHdl = 0;
 
-void EnvSensingSvc::setup(void) {
+/*
+ * Callback invoked when a connection is established
+ * @param conn_handle connection where this event happens
+ */
+void EnvSensingSvc::connectCallback(uint16_t conn_handle)
+{
+    // Get the reference to current connection
+    connHdl = conn_handle;
+    BLEConnection* connection = Bluefruit.Connection(conn_handle);
+    char central_name[32] = { 0 };
+    connection->getPeerName(central_name, sizeof(central_name));
+    Serial.print("Connected to ");
+    Serial.println(central_name);
+}
+
+/*
+ * Callback invoked when a connection is dropped
+ * @param conn_handle connection where this event happens
+ * @param reason is a BLE_HCI_STATUS_CODE which can be found in ble_hci.h
+ */
+void EnvSensingSvc::disconnectCallback(uint16_t conn_handle, uint8_t reason)
+{
     connHdl = 0;
-    _svc = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
-    _svc.begin();
-    temp.setup(UUID16_CHR_TEMPERATURE, 100, 0);
-    humid.setup(UUID16_CHR_HUMIDITY, 100, 0);
-    co2lv.setup(UUID16_CHR_POLLEN_CONCENTRATION, 1, -1);
-    batlv.setup(UUID16_CHR_BATTERY_LEVEL, 1, 0);
-    if (scd30.begin()) {
-        sensor_ok = true;
-    }
+    (void) conn_handle;
+    (void) reason;
+    Serial.print("Disconnected, reason = 0x");
+    Serial.println(reason, HEX);
+}
+
+void EnvSensingSvc::advertisingStopCallbak(void) {
+    Bluefruit.Advertising.clearData();
+    startAdv();
 }
 
 void EnvSensingSvc::updateMeasurements(int16_t t, uint16_t h,
@@ -118,7 +139,7 @@ void EnvSensingSvc::updateMeasurements(int16_t t, uint16_t h,
 }
 
 BLEService& EnvSensingSvc::getBLEService(void) {
-    return _svc;
+    return svc;
 }
 
 void EnvSensingSvc::service(void) {
@@ -156,27 +177,43 @@ void EnvSensingSvc::service(void) {
     }
 }
 
-void EnvSensingSvc::connectCallback(uint16_t conn_handle)
-{
-    // Get the reference to current connection
-    connHdl = conn_handle;
-    BLEConnection* connection = Bluefruit.Connection(conn_handle);
-    char central_name[32] = { 0 };
-    connection->getPeerName(central_name, sizeof(central_name));
-    Serial.print("Connected to ");
-    Serial.println(central_name);
+void EnvSensingSvc::advertise(void) {
+    Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+    Bluefruit.Advertising.addService(svc);
+    Bluefruit.Advertising.addName();
+    /* Start Advertising
+       - Enable auto advertising if disconnected
+       - Timeout for fast mode is 30 seconds
+       - Start(timeout) with timeout = 0 will advertise forever (until connected)
+       - Fixed interval: 100 ms -> fast = slow = 100 ms
+       */
+    Bluefruit.Advertising.setStopCallback(adv_stop_callback);
+    Bluefruit.Advertising.restartOnDisconnect(true);
+    // Bluefruit.Advertising.setInterval(32, 244);    // in unit of 0.625 ms
+    Bluefruit.Advertising.setInterval(160, 160);    // in unit of 0.625 ms
+    // Bluefruit.Advertising.setFastTimeout(ADV_FAST_TIMEOUT);
+    Bluefruit.Advertising.start(ADV_TIMEOUT);
 }
 
-/**
- * Callback invoked when a connection is dropped
- * @param conn_handle connection where this event happens
- * @param reason is a BLE_HCI_STATUS_CODE which can be found in ble_hci.h
- */
-void EnvSensingSvc::disconnectCallback(uint16_t conn_handle, uint8_t reason)
-{
+void EnvSensingSvc::setup(void) {
+    Serial.println("\nBluefruit52 GATT ESS");
+    Serial.println("--------------------------");
+    Serial.println("Configuring the Environmental Sensing Service");
+
+    Bluefruit.begin();
     connHdl = 0;
-    (void) conn_handle;
-    (void) reason;
-    Serial.print("Disconnected, reason = 0x");
-    Serial.println(reason, HEX);
+    svc = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
+    svc.begin();
+    temp.setup(UUID16_CHR_TEMPERATURE, 100, 0);
+    humid.setup(UUID16_CHR_HUMIDITY, 100, 0);
+    co2lv.setup(UUID16_CHR_POLLEN_CONCENTRATION, 1, -1);
+    batlv.setup(UUID16_CHR_BATTERY_LEVEL, 1, 0);
+    // Set the connect/disconnect callback handlers
+    Bluefruit.Periph.setConnectCallback(&EnvSensingSvc::connectCallback);
+    Bluefruit.Periph.setDisconnectCallback(&EnvSensingSvc::disconnectCallback);
+
+    /* Make sure sensor is initialized */
+    if (scd30.begin()) {
+        sensor_ok = true;
+    }
 }

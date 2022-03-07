@@ -70,17 +70,6 @@ void setup()
     pinMode(PIN_BUTTON1, INPUT);
     // while ( !Serial ) delay(10);
 
-    Serial.println("\nBluefruit52 GATT ESS");
-    Serial.println("--------------------------");
-
-    Bluefruit.begin();
-
-    // Set the connect/disconnect callback handlers
-    Bluefruit.Periph.setConnectCallback(&EnvSensingSvc::connectCallback);
-    Bluefruit.Periph.setDisconnectCallback(&EnvSensingSvc::disconnectCallback);
-
-    // BLEService and BLECharacteristic classes
-    Serial.println("Configuring the Environmental Sensing Service");
     ess.setup();
 
     // Setup the advertising packet(s)
