@@ -7,6 +7,10 @@
 #define UUID_CHR_DESCRIPTOR_ES_MEAS  0x290C
 #define ES_MEAS_DESCR_SIZE 11
 
+#define ADV_TIMEOUT        20
+#define ADV_FAST_TIMEOUT   ADV_TIMEOUT/2
+#define ADV_SVC_DATA_LEN   5
+
 typedef enum BLECharsProperties ChrProps;
 /*
     BLEBroadcast            = 0x01
@@ -49,7 +53,7 @@ class EnvSensingChr {
 class EnvSensingSvc {
     private:
         static uint16_t         connHdl;
-        BLEService              _svc;
+        BLEService              svc;
         EnvSensingChr<int16_t>  temp;
         EnvSensingChr<uint16_t> humid;
         EnvSensingChr<uint32_t> co2lv;
@@ -62,8 +66,10 @@ class EnvSensingSvc {
         void setup(void);
         BLEService& getBLEService(void);
         void updateMeasurements(int16_t t, uint16_t h, uint32_t c, uint8_t b);
+        void startAdvertising(void);
         static void connectCallback(uint16_t conn_handle);
         static void disconnectCallback(uint16_t conn_handle, uint8_t reason);
+        static void advertisingStopCallback(void);
 };
 
 

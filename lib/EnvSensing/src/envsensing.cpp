@@ -74,14 +74,10 @@ void EnvSensingChr<T>::update(void) {
         case NOTIFY:
             ret = chr.notify((uint8_t *) &data,
                     sizeof(chrData) + dataOffset);
-            Serial.print("ChrNotify returned: ");
-            Serial.println(ret);
             break;
         case WRITE:
             ret = chr.write((uint8_t *) &chrData,
                     sizeof(chrData) + dataOffset);
-            Serial.print("ChrWrite returned: ");
-            Serial.println(ret);
             break;
         default:
             break;
@@ -125,9 +121,9 @@ void EnvSensingSvc::disconnectCallback(uint16_t conn_handle, uint8_t reason)
     Serial.println(reason, HEX);
 }
 
-void EnvSensingSvc::advertisingStopCallbak(void) {
+void EnvSensingSvc::advertisingStopCallback(void) {
     Bluefruit.Advertising.clearData();
-    startAdv();
+    // EnvSensingSvc::startAdvertising();
 }
 
 void EnvSensingSvc::updateMeasurements(int16_t t, uint16_t h,
@@ -140,6 +136,23 @@ void EnvSensingSvc::updateMeasurements(int16_t t, uint16_t h,
 
 BLEService& EnvSensingSvc::getBLEService(void) {
     return svc;
+}
+
+void EnvSensingSvc::startAdvertising(void) {
+    Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+    Bluefruit.Advertising.addService(svc);
+    Bluefruit.Advertising.addName();
+    /* Start Advertising
+       - Enable auto advertising if disconnected
+       - Timeout for fast mode is 30 seconds
+       - Start(timeout) with timeout = 0 will advertise forever (until connected)
+       - Fixed interval: 100 ms -> fast = slow = 100 ms
+       */
+    //Bluefruit.Advertising.setStopCallback(adv_stop_callback);
+    Bluefruit.Advertising.restartOnDisconnect(true);
+    Bluefruit.Advertising.setInterval(160, 160);    // in unit of 0.625 ms
+    // Bluefruit.Advertising.setFastTimeout(ADV_FAST_TIMEOUT);
+    Bluefruit.Advertising.start(ADV_TIMEOUT);
 }
 
 void EnvSensingSvc::service(void) {
@@ -174,40 +187,32 @@ void EnvSensingSvc::service(void) {
         humid.update();
         co2lv.update();
         batlv.update();
+    } else if ( !Bluefruit.Advertising.isRunning() ) {
+        startAdvertising();
     }
 }
 
-void EnvSensingSvc::advertise(void) {
-    Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
-    Bluefruit.Advertising.addService(svc);
-    Bluefruit.Advertising.addName();
-    /* Start Advertising
-       - Enable auto advertising if disconnected
-       - Timeout for fast mode is 30 seconds
-       - Start(timeout) with timeout = 0 will advertise forever (until connected)
-       - Fixed interval: 100 ms -> fast = slow = 100 ms
-       */
-    Bluefruit.Advertising.setStopCallback(adv_stop_callback);
-    Bluefruit.Advertising.restartOnDisconnect(true);
-    // Bluefruit.Advertising.setInterval(32, 244);    // in unit of 0.625 ms
-    Bluefruit.Advertising.setInterval(160, 160);    // in unit of 0.625 ms
-    // Bluefruit.Advertising.setFastTimeout(ADV_FAST_TIMEOUT);
-    Bluefruit.Advertising.start(ADV_TIMEOUT);
-}
-
 void EnvSensingSvc::setup(void) {
+    connHdl = 0;
     Serial.println("\nBluefruit52 GATT ESS");
     Serial.println("--------------------------");
     Serial.println("Configuring the Environmental Sensing Service");
 
+    /* Init Bluefruit lib */
     Bluefruit.begin();
-    connHdl = 0;
+
+    /* Init Environmental Sensing Service (ESS) */
     svc = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
     svc.begin();
+
+    /* Init characteristics associated with the ESS */
     temp.setup(UUID16_CHR_TEMPERATURE, 100, 0);
     humid.setup(UUID16_CHR_HUMIDITY, 100, 0);
     co2lv.setup(UUID16_CHR_POLLEN_CONCENTRATION, 1, -1);
     batlv.setup(UUID16_CHR_BATTERY_LEVEL, 1, 0);
+
+    /* Init Advertising */
+
     // Set the connect/disconnect callback handlers
     Bluefruit.Periph.setConnectCallback(&EnvSensingSvc::connectCallback);
     Bluefruit.Periph.setDisconnectCallback(&EnvSensingSvc::disconnectCallback);
