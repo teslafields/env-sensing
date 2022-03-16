@@ -9,7 +9,7 @@
 
 #define ADV_TIMEOUT        20
 #define ADV_FAST_TIMEOUT   ADV_TIMEOUT/2
-#define ADV_SVC_DATA_LEN   5
+#define ADV_SVC_DATA_LEN   6
 
 typedef enum BLECharsProperties ChrProps;
 /*
@@ -27,14 +27,23 @@ typedef enum ChrSensingState {
     NOTIFY
 } chrSensingState;
 
+struct adv_service_data {
+    uint8_t data[ADV_SVC_DATA_LEN];
+    uint16_t n;
+};
+
+using serviceData = adv_service_data;
+
 template <class T>
 class EnvSensingChr {
   private:
     T chrData;
-    int8_t dataOffset;
+    int8_t gattLenOffset;
+    int8_t advLenOffset;
     uint16_t dataGain;
     chrSensingState state;
     BLECharacteristic chr;
+    uint16_t chrUuid;
     uint16_t connHdl;
     bool writeFlagged = false;
     //void cccdWriteCallback(uint16_t conn_hdl,
@@ -46,7 +55,9 @@ class EnvSensingChr {
     void setData(T data);
     void setState(chrSensingState st);
     void setConnectionHandle(uint16_t conn);
-    void setup(uint16_t uuid, uint16_t gain, int8_t offset);
+    serviceData getAdvServiceData(void);
+    void setup(uint16_t uuid, uint16_t gain, int8_t gatt_offset,
+            int8_t adv_offset);
     void update(void);
 };
 

@@ -6,7 +6,7 @@ template <class T>
 EnvSensingChr<T>::config(uint16_t uuid, uint16_t gain, int8_t offset) {
     chrData = 0;
     dataGain = gain;
-    dataOffset = offset;
+    gattLenOffset = offset;
     chr = BLECharacteristic(uuid);
 }
 */
@@ -31,10 +31,37 @@ void EnvSensingChr<T>::setState(chrSensingState st) {
 }
 
 template <class T>
-void EnvSensingChr<T>::setup(uint16_t uuid, uint16_t gain, int8_t offset) {
+serviceData EnvSensingChr<T>::getAdvServiceData(void) {
+    serviceData adv_data = {
+        .data = {0},
+        .n = sizeof(T),
+    };
+    uint8_t uuidlow = (uint8_t) chrUuid & 0xff;
+    uint8_t uuidhigh = (uint8_t) (chrUuid >> 8) & 0xff;
+    adv_data.data[0] = uuidlow;
+    adv_data.data[1] = uuidhigh;
+    adv_data.n += 2;
+    T chr_data = getDataGain();
+    uint8_t* ptr_data = (uint8_t *) &chr_data;
+
+    /* Check boundaries of the advertising packet size */
+    if (adv_data.n > ADV_SVC_DATA_LEN - 2) {
+        adv_data.n = ADV_SVC_DATA_LEN;
+    }
+    for (int i = 2; i < adv_data.n; i++) {
+        adv_data.data[i] = *ptr_data++;
+    }
+    return adv_data;
+}
+
+template <class T>
+void EnvSensingChr<T>::setup(uint16_t uuid, uint16_t gain, int8_t gatt_offset,
+        int8_t adv_offset) {
     chrData = 0;
     dataGain = gain;
-    dataOffset = offset;
+    gattLenOffset = gatt_offset;
+    advLenOffset = adv_offset;
+    chrUuid = uuid;
     chr = BLECharacteristic(uuid);
     chr.setProperties(CHR_PROPS_NOTIFY);
     chr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
@@ -73,11 +100,11 @@ void EnvSensingChr<T>::update(void) {
     switch (state) {
         case NOTIFY:
             ret = chr.notify((uint8_t *) &data,
-                    sizeof(chrData) + dataOffset);
+                    sizeof(chrData) + gattLenOffset);
             break;
         case WRITE:
             ret = chr.write((uint8_t *) &chrData,
-                    sizeof(chrData) + dataOffset);
+                    sizeof(chrData) + gattLenOffset);
             break;
         default:
             break;
@@ -138,10 +165,44 @@ BLEService& EnvSensingSvc::getBLEService(void) {
     return svc;
 }
 
+void addAdvertisingServiceData(int32_t value, uint8_t n) {
+    uint16_t uuid = 0;
+    uint8_t uuidlow = (uint8_t) uuid & 0xff;
+    uint8_t uuidhigh = (uint8_t) (uuid >> 8) & 0xff;
+    uint8_t svc_uuid[ADV_SVC_DATA_LEN] = {0};
+    svc_uuid[0] = uuidlow;
+    svc_uuid[1] = uuidhigh;
+    uint8_t* data = (uint8_t *) &value;
+    n = n > ADV_SVC_DATA_LEN - 2 ? ADV_SVC_DATA_LEN : n + 2;
+    for (int i = 2; i < n; i++) {
+        svc_uuid[i] = *data;
+        data++;
+    }
+    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA, &svc_uuid, n);
+}
+
 void EnvSensingSvc::startAdvertising(void) {
+    Bluefruit.Advertising.clearData();
     Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
     Bluefruit.Advertising.addService(svc);
-    Bluefruit.Advertising.addName();
+    // Bluefruit.Advertising.addName();
+    serviceData chr_adv_data = temp.getAdvServiceData();
+    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA,
+            chr_adv_data.data, chr_adv_data.n);
+    Serial.print(chr_adv_data.n);
+    Serial.print(" [");
+    for (int i=0; i<chr_adv_data.n; i++) {
+        Serial.print(chr_adv_data.data[i]);
+        Serial.print(" ");
+    }
+    Serial.println("]");
+    Serial.print(" [");
+    uint8_t *data = Bluefruit.Advertising.getData();
+    for (int i=0; i<BLE_GAP_ADV_SET_DATA_SIZE_MAX; i++) {
+        Serial.print(*data++);
+        Serial.print(" ");
+    }
+    Serial.println("]");
     /* Start Advertising
        - Enable auto advertising if disconnected
        - Timeout for fast mode is 30 seconds
@@ -153,6 +214,37 @@ void EnvSensingSvc::startAdvertising(void) {
     Bluefruit.Advertising.setInterval(160, 160);    // in unit of 0.625 ms
     // Bluefruit.Advertising.setFastTimeout(ADV_FAST_TIMEOUT);
     Bluefruit.Advertising.start(ADV_TIMEOUT);
+}
+
+void EnvSensingSvc::setup(void) {
+    connHdl = 0;
+    Serial.println("\nBluefruit52 GATT ESS");
+    Serial.println("--------------------------");
+    Serial.println("Configuring the Environmental Sensing Service");
+
+    /* Init Bluefruit lib */
+    Bluefruit.begin();
+
+    /* Init Environmental Sensing Service (ESS) */
+    svc = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
+    svc.begin();
+
+    /* Init characteristics associated with the ESS */
+    temp.setup(UUID16_CHR_TEMPERATURE, 100, 0, 0);
+    humid.setup(UUID16_CHR_HUMIDITY, 100, 0, 0);
+    co2lv.setup(UUID16_CHR_POLLEN_CONCENTRATION, 1, -1, 2);
+    batlv.setup(UUID16_CHR_BATTERY_LEVEL, 1, 0, 0);
+
+    /* Init Advertising */
+
+    // Set the connect/disconnect callback handlers
+    Bluefruit.Periph.setConnectCallback(&EnvSensingSvc::connectCallback);
+    Bluefruit.Periph.setDisconnectCallback(&EnvSensingSvc::disconnectCallback);
+
+    /* Make sure sensor is initialized */
+    if (scd30.begin()) {
+        sensor_ok = true;
+    }
 }
 
 void EnvSensingSvc::service(void) {
@@ -192,33 +284,3 @@ void EnvSensingSvc::service(void) {
     }
 }
 
-void EnvSensingSvc::setup(void) {
-    connHdl = 0;
-    Serial.println("\nBluefruit52 GATT ESS");
-    Serial.println("--------------------------");
-    Serial.println("Configuring the Environmental Sensing Service");
-
-    /* Init Bluefruit lib */
-    Bluefruit.begin();
-
-    /* Init Environmental Sensing Service (ESS) */
-    svc = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
-    svc.begin();
-
-    /* Init characteristics associated with the ESS */
-    temp.setup(UUID16_CHR_TEMPERATURE, 100, 0);
-    humid.setup(UUID16_CHR_HUMIDITY, 100, 0);
-    co2lv.setup(UUID16_CHR_POLLEN_CONCENTRATION, 1, -1);
-    batlv.setup(UUID16_CHR_BATTERY_LEVEL, 1, 0);
-
-    /* Init Advertising */
-
-    // Set the connect/disconnect callback handlers
-    Bluefruit.Periph.setConnectCallback(&EnvSensingSvc::connectCallback);
-    Bluefruit.Periph.setDisconnectCallback(&EnvSensingSvc::disconnectCallback);
-
-    /* Make sure sensor is initialized */
-    if (scd30.begin()) {
-        sensor_ok = true;
-    }
-}
