@@ -4,10 +4,12 @@
 #include <bluefruit.h>
 #include <Adafruit_SCD30.h>
 
+#define CO2_REFERENCE 408
+
 #define UUID_CHR_DESCRIPTOR_ES_MEAS  0x290C
 #define ES_MEAS_DESCR_SIZE 11
 
-#define ADV_TIMEOUT        20
+#define ADV_TIMEOUT        16
 #define ADV_FAST_TIMEOUT   ADV_TIMEOUT/2
 #define ADV_SVC_DATA_LEN   6
 
@@ -29,7 +31,7 @@ typedef enum ChrSensingState {
 
 struct adv_service_data {
     uint8_t data[ADV_SVC_DATA_LEN];
-    uint16_t n;
+    uint8_t n;
 };
 
 using serviceData = adv_service_data;
@@ -42,7 +44,7 @@ class EnvSensingChr {
     int8_t advLenOffset;
     uint16_t dataGain;
     chrSensingState state;
-    BLECharacteristic chr;
+    BLECharacteristic bleChr;
     uint16_t chrUuid;
     uint16_t connHdl;
     bool writeFlagged = false;
@@ -50,18 +52,37 @@ class EnvSensingChr {
     //        BLECharacteristic* chr, uint16_t cccd_value);
 
   public:
+    EnvSensingChr(uint16_t uuid, uint16_t gain, int8_t gatt_offset=0,
+            int8_t adv_offset=0);
     T getData();
     T getDataGain();
     void setData(T data);
     void setState(chrSensingState st);
     void setConnectionHandle(uint16_t conn);
     serviceData getAdvServiceData(void);
-    void setup(uint16_t uuid, uint16_t gain, int8_t gatt_offset,
-            int8_t adv_offset);
-    void update(void);
+    void setup();
+    uint16_t update(void);
 };
 
 class EnvSensingSvc {
+    public:
+        /* Constructor */
+        EnvSensingSvc(void);
+
+        void setup(void);
+        void startAdvertising(void);
+        void service(void);
+        BLEService& getBLEService(void);
+        void updateMeasurements(int16_t t, uint16_t h, uint32_t c,
+                uint8_t b);
+        bool recalibrateSensor(void);
+
+        /* Callbacks */
+        static void connectCallback(uint16_t conn_handle);
+        static void disconnectCallback(uint16_t conn_handle,
+                uint8_t reason);
+        static void advertisingStopCallback(void);
+
     private:
         static uint16_t         connHdl;
         BLEService              svc;
@@ -69,26 +90,18 @@ class EnvSensingSvc {
         EnvSensingChr<uint16_t> humid;
         EnvSensingChr<uint32_t> co2lv;
         EnvSensingChr<uint8_t>  batlv;
+
         /* Sensor SCD30 */
         bool                    sensor_ok = false;
         Adafruit_SCD30          scd30;
-    public:
-        void service(void);
-        void setup(void);
-        BLEService& getBLEService(void);
-        void updateMeasurements(int16_t t, uint16_t h, uint32_t c, uint8_t b);
-        void startAdvertising(void);
-        static void connectCallback(uint16_t conn_handle);
-        static void disconnectCallback(uint16_t conn_handle, uint8_t reason);
-        static void advertisingStopCallback(void);
 };
 
 
 
-void cccdWriteCallback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t cccd_value);
+void cccdWriteCallback(uint16_t conn_hdl, BLECharacteristic* chr,
+        uint16_t cccd_value);
 
 extern uint8_t envSensingDesc[];
 
 #endif
-
 

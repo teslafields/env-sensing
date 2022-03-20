@@ -10,6 +10,7 @@
 
 #define REAL_VBAT_MV_PER_LSB (VBAT_DIVIDER_COMP * VBAT_MV_PER_LSB)
 
+void setupADC(void);
 float readVBAT(void);
 uint8_t mvToPercent(float mvolts);
 #endif

@@ -1,8 +1,6 @@
 #include "battery.h"
 
-float readVBAT(void) {
-    float raw;
-
+void setupADC(void) {
     // Set the analog reference to 3.0V (default = 3.6V)
     analogReference(AR_INTERNAL_3_0);
 
@@ -12,12 +10,15 @@ float readVBAT(void) {
     // Let the ADC settle
     delay(1);
 
+    // Set the ADC back to the default settings
+    // analogReference(AR_DEFAULT);
+    // analogReadResolution(10);
+}
+
+float readVBAT(void) {
+    float raw;
     // Get the raw 12-bit, 0..3000mV ADC value
     raw = analogRead(PIN_VBAT);
-
-    // Set the ADC back to the default settings
-    analogReference(AR_DEFAULT);
-    analogReadResolution(10);
 
     // Convert the raw value to compensated mv, taking the resistor-
     // divider into account (providing the actual LIPO voltage)

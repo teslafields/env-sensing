@@ -1,15 +1,18 @@
 #include "envsensing.h"
 #include "battery.h"
 
-/*
+
 template <class T>
-EnvSensingChr<T>::config(uint16_t uuid, uint16_t gain, int8_t offset) {
+EnvSensingChr<T>::EnvSensingChr(uint16_t uuid, uint16_t gain, int8_t gatt_offset,
+        int8_t adv_offset) {
     chrData = 0;
     dataGain = gain;
-    gattLenOffset = offset;
-    chr = BLECharacteristic(uuid);
+    gattLenOffset = gatt_offset;
+    advLenOffset = adv_offset;
+    chrUuid = uuid;
+    bleChr = BLECharacteristic(uuid);
 }
-*/
+
 template <class T>
 T EnvSensingChr<T>::getData(void) {
     return chrData;
@@ -34,7 +37,7 @@ template <class T>
 serviceData EnvSensingChr<T>::getAdvServiceData(void) {
     serviceData adv_data = {
         .data = {0},
-        .n = sizeof(T),
+        .n = (uint8_t) (sizeof(T) + advLenOffset),
     };
     uint8_t uuidlow = (uint8_t) chrUuid & 0xff;
     uint8_t uuidhigh = (uint8_t) (chrUuid >> 8) & 0xff;
@@ -55,28 +58,19 @@ serviceData EnvSensingChr<T>::getAdvServiceData(void) {
 }
 
 template <class T>
-void EnvSensingChr<T>::setup(uint16_t uuid, uint16_t gain, int8_t gatt_offset,
-        int8_t adv_offset) {
-    chrData = 0;
-    dataGain = gain;
-    gattLenOffset = gatt_offset;
-    advLenOffset = adv_offset;
-    chrUuid = uuid;
-    chr = BLECharacteristic(uuid);
-    chr.setProperties(CHR_PROPS_NOTIFY);
-    chr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
-    chr.setCccdWriteCallback(&cccdWriteCallback);
-    chr.begin();
-    chr.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &envSensingDesc,
+void EnvSensingChr<T>::setup() {
+    bleChr.setProperties(CHR_PROPS_NOTIFY);
+    bleChr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+    bleChr.setCccdWriteCallback(&cccdWriteCallback);
+    bleChr.begin();
+    bleChr.addDescriptor(UUID_CHR_DESCRIPTOR_ES_MEAS, &envSensingDesc,
             ES_MEAS_DESCR_SIZE);
     writeFlagged = true;
     this->update();
 }
 
-//template <class T>
-//void EnvSensingChr<T>::cccdWriteCallback(uint16_t conn_hdl,
-void cccdWriteCallback(uint16_t conn_hdl,
-        BLECharacteristic* chr, uint16_t cccd_value) {
+void cccdWriteCallback(uint16_t conn_hdl, BLECharacteristic* chr,
+        uint16_t cccd_value) {
     // Check if notify was enabled
     if (chr->notifyEnabled(conn_hdl)) {
     } else {
@@ -84,8 +78,8 @@ void cccdWriteCallback(uint16_t conn_hdl,
 }
 
 template <class T>
-void EnvSensingChr<T>::update(void) {
-    if (chr.notifyEnabled()) {
+uint16_t EnvSensingChr<T>::update(void) {
+    if (bleChr.notifyEnabled()) {
         state = NOTIFY;
     } else if (writeFlagged) {
         state = WRITE;
@@ -94,21 +88,22 @@ void EnvSensingChr<T>::update(void) {
         state = NONE;
     }
 
-    uint16_t ret;
+    uint16_t ret = 0;
     T data = this->getDataGain();
 
     switch (state) {
         case NOTIFY:
-            ret = chr.notify((uint8_t *) &data,
+            ret = (uint16_t) bleChr.notify((uint8_t *) &data,
                     sizeof(chrData) + gattLenOffset);
             break;
         case WRITE:
-            ret = chr.write((uint8_t *) &chrData,
+            ret = bleChr.write((uint8_t *) &chrData,
                     sizeof(chrData) + gattLenOffset);
             break;
         default:
             break;
     }
+    return ret;
 }
 
 /* Force compile to those types */
@@ -118,6 +113,161 @@ template class EnvSensingChr<int16_t>;
 template class EnvSensingChr<uint32_t>;
 
 uint16_t EnvSensingSvc::connHdl = 0;
+
+/* Init ESS and its associated characteristics
+ * Environmental Sensing Service UUID is 0x181A
+ * GATT Characteristic 0x2A6E Temperature
+ * GATT Characteristic 0x2A6F Humidity
+ * GATT Characteristic 0x2BD0 CO concentration
+ *  But SIGs 16-uuid oficial page does not have CO2, so we use POLLEN
+ *  which is an equivalent - 0x2A75.
+ */
+EnvSensingSvc::EnvSensingSvc() : temp(UUID16_CHR_TEMPERATURE, 100),
+        humid(UUID16_CHR_HUMIDITY, 100),
+        co2lv(UUID16_CHR_POLLEN_CONCENTRATION, 1, -1, -2),
+        batlv(UUID16_CHR_BATTERY_LEVEL, 1) {
+    svc = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
+}
+
+void EnvSensingSvc::updateMeasurements(int16_t t, uint16_t h,
+        uint32_t c, uint8_t b) {
+    temp.setData(t);
+    humid.setData(h);
+    co2lv.setData(c);
+    batlv.setData(b);
+}
+
+BLEService& EnvSensingSvc::getBLEService(void) {
+    return svc;
+}
+
+bool EnvSensingSvc::recalibrateSensor(void) {
+    // return scd30.forceRecalibrationWithReference(CO2_REFERENCE);
+    return true;
+}
+
+void EnvSensingSvc::startAdvertising(void) {
+    Bluefruit.Advertising.clearData();
+    Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+    Bluefruit.Advertising.addService(svc);
+
+    serviceData chr_adv_data = temp.getAdvServiceData();
+    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA,
+            chr_adv_data.data, chr_adv_data.n);
+
+    chr_adv_data = humid.getAdvServiceData();
+    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA,
+            chr_adv_data.data, chr_adv_data.n);
+
+    chr_adv_data = co2lv.getAdvServiceData();
+    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA,
+            chr_adv_data.data, chr_adv_data.n);
+
+    chr_adv_data = batlv.getAdvServiceData();
+    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA,
+            chr_adv_data.data, chr_adv_data.n);
+
+#ifdef DEBUG_ADV
+    Serial.print("ADV PKT: [");
+    uint8_t *data = Bluefruit.Advertising.getData();
+    for (int i=0; i<BLE_GAP_ADV_SET_DATA_SIZE_MAX; i++) {
+        Serial.print(*data++, HEX);
+        Serial.print(" ");
+    }
+    Serial.println("]");
+#endif
+
+    Bluefruit.ScanResponse.addName();
+
+    /* Start Advertising
+     * - Enable auto advertising if disconnected
+     * - Timeout for fast mode is 30 seconds
+     * - Start(timeout) with timeout = 0 will advertise forever (until connected)
+     * - Fixed interval: 500 ms -> fast = slow = 500 ms
+     * - setInterval argument in units of 0.625 ms
+     */
+    Bluefruit.Advertising.setInterval(800, 800);
+    Bluefruit.Advertising.restartOnDisconnect(true);
+    //Bluefruit.Advertising.setStopCallback(adv_stop_callback);
+    Bluefruit.Advertising.start(ADV_TIMEOUT);
+}
+
+void EnvSensingSvc::setup(void) {
+    connHdl = 0;
+
+    setupADC();
+
+    Serial.println("\nBluefruit52 GATT ESS");
+    Serial.println("--------------------------");
+    Serial.println("Configuring the Environmental Sensing Service");
+
+    /* Init Bluefruit lib */
+    Bluefruit.begin();
+
+    Bluefruit.autoConnLed(false);
+    Bluefruit.setTxPower(0);
+
+    svc.begin();
+
+    temp.setup();
+    humid.setup();
+    co2lv.setup();
+    batlv.setup();
+
+    /* Set the connect/disconnect callback handlers */
+    Bluefruit.Periph.setConnectCallback(&EnvSensingSvc::connectCallback);
+    Bluefruit.Periph.setDisconnectCallback(&EnvSensingSvc::disconnectCallback);
+
+    /* Make sure sensor is initialized */
+    if (scd30.begin()) {
+        sensor_ok = true;
+    }
+}
+
+void EnvSensingSvc::service(void) {
+    digitalWrite(LED_BLUE, HIGH);
+    float vbat_mv = readVBAT();
+    // Convert from raw mv to percentage (based on LIPO chemistry)
+    uint8_t vbat_per = mvToPercent(vbat_mv);
+
+    if (sensor_ok) {
+        if (scd30.dataReady()) {
+            if (scd30.read()) {
+                temp.setData((int16_t) (scd30.temperature + 0.5));
+                humid.setData((uint16_t) (scd30.relative_humidity + 0.5));
+                co2lv.setData((uint32_t) (scd30.CO2 + 0.5));
+                batlv.setData(vbat_per);
+            }
+#ifdef DEBUG_MEASURE
+            Serial.print("Temperature: ");
+            Serial.print(temp.getData());
+            Serial.print(" C | Humidity: ");
+            Serial.print(humid.getData());
+            Serial.print(" % | CO2: ");
+            Serial.print(co2lv.getData());
+            Serial.print(" ppm | ");
+        }
+    }
+    Serial.print("Battery: ");
+    Serial.print(vbat_mv);
+    Serial.print(" mV ");
+    Serial.print(vbat_per);
+    Serial.println(" %");
+#else
+        }
+    }
+#endif
+
+    if ( Bluefruit.connected() ) {
+        temp.update();
+        humid.update();
+        co2lv.update();
+        batlv.update();
+    } else if ( !Bluefruit.Advertising.isRunning() ) {
+        startAdvertising();
+    }
+    digitalWrite(LED_BLUE, LOW);
+}
 
 /*
  * Callback invoked when a connection is established
@@ -146,141 +296,5 @@ void EnvSensingSvc::disconnectCallback(uint16_t conn_handle, uint8_t reason)
     (void) reason;
     Serial.print("Disconnected, reason = 0x");
     Serial.println(reason, HEX);
-}
-
-void EnvSensingSvc::advertisingStopCallback(void) {
-    Bluefruit.Advertising.clearData();
-    // EnvSensingSvc::startAdvertising();
-}
-
-void EnvSensingSvc::updateMeasurements(int16_t t, uint16_t h,
-        uint32_t c, uint8_t b) {
-    temp.setData(t);
-    humid.setData(h);
-    co2lv.setData(c);
-    batlv.setData(b);
-}
-
-BLEService& EnvSensingSvc::getBLEService(void) {
-    return svc;
-}
-
-void addAdvertisingServiceData(int32_t value, uint8_t n) {
-    uint16_t uuid = 0;
-    uint8_t uuidlow = (uint8_t) uuid & 0xff;
-    uint8_t uuidhigh = (uint8_t) (uuid >> 8) & 0xff;
-    uint8_t svc_uuid[ADV_SVC_DATA_LEN] = {0};
-    svc_uuid[0] = uuidlow;
-    svc_uuid[1] = uuidhigh;
-    uint8_t* data = (uint8_t *) &value;
-    n = n > ADV_SVC_DATA_LEN - 2 ? ADV_SVC_DATA_LEN : n + 2;
-    for (int i = 2; i < n; i++) {
-        svc_uuid[i] = *data;
-        data++;
-    }
-    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA, &svc_uuid, n);
-}
-
-void EnvSensingSvc::startAdvertising(void) {
-    Bluefruit.Advertising.clearData();
-    Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
-    Bluefruit.Advertising.addService(svc);
-    // Bluefruit.Advertising.addName();
-    serviceData chr_adv_data = temp.getAdvServiceData();
-    Bluefruit.Advertising.addData(BLE_GAP_AD_TYPE_SERVICE_DATA,
-            chr_adv_data.data, chr_adv_data.n);
-    Serial.print(chr_adv_data.n);
-    Serial.print(" [");
-    for (int i=0; i<chr_adv_data.n; i++) {
-        Serial.print(chr_adv_data.data[i]);
-        Serial.print(" ");
-    }
-    Serial.println("]");
-    Serial.print(" [");
-    uint8_t *data = Bluefruit.Advertising.getData();
-    for (int i=0; i<BLE_GAP_ADV_SET_DATA_SIZE_MAX; i++) {
-        Serial.print(*data++);
-        Serial.print(" ");
-    }
-    Serial.println("]");
-    /* Start Advertising
-       - Enable auto advertising if disconnected
-       - Timeout for fast mode is 30 seconds
-       - Start(timeout) with timeout = 0 will advertise forever (until connected)
-       - Fixed interval: 100 ms -> fast = slow = 100 ms
-       */
-    //Bluefruit.Advertising.setStopCallback(adv_stop_callback);
-    Bluefruit.Advertising.restartOnDisconnect(true);
-    Bluefruit.Advertising.setInterval(160, 160);    // in unit of 0.625 ms
-    // Bluefruit.Advertising.setFastTimeout(ADV_FAST_TIMEOUT);
-    Bluefruit.Advertising.start(ADV_TIMEOUT);
-}
-
-void EnvSensingSvc::setup(void) {
-    connHdl = 0;
-    Serial.println("\nBluefruit52 GATT ESS");
-    Serial.println("--------------------------");
-    Serial.println("Configuring the Environmental Sensing Service");
-
-    /* Init Bluefruit lib */
-    Bluefruit.begin();
-
-    /* Init Environmental Sensing Service (ESS) */
-    svc = BLEService(UUID16_SVC_ENVIRONMENTAL_SENSING);
-    svc.begin();
-
-    /* Init characteristics associated with the ESS */
-    temp.setup(UUID16_CHR_TEMPERATURE, 100, 0, 0);
-    humid.setup(UUID16_CHR_HUMIDITY, 100, 0, 0);
-    co2lv.setup(UUID16_CHR_POLLEN_CONCENTRATION, 1, -1, 2);
-    batlv.setup(UUID16_CHR_BATTERY_LEVEL, 1, 0, 0);
-
-    /* Init Advertising */
-
-    // Set the connect/disconnect callback handlers
-    Bluefruit.Periph.setConnectCallback(&EnvSensingSvc::connectCallback);
-    Bluefruit.Periph.setDisconnectCallback(&EnvSensingSvc::disconnectCallback);
-
-    /* Make sure sensor is initialized */
-    if (scd30.begin()) {
-        sensor_ok = true;
-    }
-}
-
-void EnvSensingSvc::service(void) {
-    float vbat_mv = readVBAT();
-    // Convert from raw mv to percentage (based on LIPO chemistry)
-    uint8_t vbat_per = mvToPercent(vbat_mv);
-
-    if (sensor_ok) {
-        if (scd30.dataReady()) {
-            if (scd30.read()) {
-                temp.setData((int16_t) (scd30.temperature + 0.5));
-                humid.setData((uint16_t) (scd30.relative_humidity + 0.5));
-                co2lv.setData((uint32_t) (scd30.CO2 + 0.5));
-            }
-            Serial.print("Temperature: ");
-            Serial.print(temp.getData());
-            Serial.print(" C | Humidity: ");
-            Serial.print(humid.getData());
-            Serial.print(" % | CO2: ");
-            Serial.print(co2lv.getData());
-            Serial.print(" ppm ");
-        }
-    }
-    Serial.print("Battery: ");
-    Serial.print(vbat_mv);
-    Serial.print(" mV ");
-    Serial.print(vbat_per);
-    Serial.println(" %");
-
-    if ( Bluefruit.connected() ) {
-        temp.update();
-        humid.update();
-        co2lv.update();
-        batlv.update();
-    } else if ( !Bluefruit.Advertising.isRunning() ) {
-        startAdvertising();
-    }
 }
 
