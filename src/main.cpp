@@ -9,6 +9,13 @@
 #define MANUFACTURER_ID    0x0059
 
 EnvSensingSvc ess;
+uint16_t ess_period_count = 0;
+
+uint8_t btn_val = 0;
+bool btn_pressed_event = false;
+uint16_t btn_pressed_count = 0;
+uint16_t btn_unpressed_count = 0;
+
 
 void setup()
 {
@@ -22,20 +29,13 @@ void setup()
     ess.setup();
 }
 
-uint8_t btn_val = 0;
-bool btn_pressed_event = false;
-uint16_t btn_pressed_count = 0;
-uint16_t btn_unpressed_count = 0;
-
-uint16_t ess_trigger_count = 0;
-
 void loop()
 {
-    if (ess_trigger_count >= 4) {
+    if (ess_period_count >= 4) {
         ess.service();
-        ess_trigger_count = 0;
+        ess_period_count = 0;
     } else {
-        ess_trigger_count++;
+        ess_period_count++;
     }
     btn_val = digitalRead(PIN_BUTTON1);
     if (btn_val == LOW && !btn_pressed_event) {
@@ -47,15 +47,10 @@ void loop()
             if (btn_val == HIGH) {
                 btn_pressed_event = false;
             } else if (btn_pressed_count >= BTN_HYSTERESIS && !btn_unpressed_count) {
+                blink_led(LED_RED);
                 if (ess.recalibrateSensor()) {
-                    digitalWrite(LED_RED, HIGH);
-                    delay(DELAY_TIME/2);
-                    digitalWrite(LED_RED, LOW);
-                    delay(DELAY_TIME/2);
+                    blink_led(LED_RED);
                 }
-                digitalWrite(LED_RED, HIGH);
-                delay(DELAY_TIME/2);
-                digitalWrite(LED_RED, LOW);
                 btn_pressed_event = false;
                 btn_unpressed_count = BTN_HYSTERESIS;
             } else {

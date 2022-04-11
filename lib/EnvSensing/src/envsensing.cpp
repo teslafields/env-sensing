@@ -142,8 +142,18 @@ BLEService& EnvSensingSvc::getBLEService(void) {
 }
 
 bool EnvSensingSvc::recalibrateSensor(void) {
-    // return scd30.forceRecalibrationWithReference(CO2_REFERENCE);
-    return true;
+    bool result = false;
+    if (scd30.setMeasurementInterval(2)) {
+        if (scd30.forceRecalibrationWithReference(CO2_REFERENCE)) {
+            Serial.println("SCD30 recalibration started!");
+            recalibrationFlag = true;
+            recalibrationTs = millis();
+            result = true;
+        } else {
+            scd30.setMeasurementInterval(10);
+        }
+    }
+    return result;
 }
 
 void EnvSensingSvc::startAdvertising(void) {
@@ -221,6 +231,7 @@ void EnvSensingSvc::setup(void) {
     /* Make sure sensor is initialized */
     if (scd30.begin()) {
         sensor_ok = true;
+        scd30.setMeasurementInterval(2);
     }
 }
 
@@ -231,7 +242,15 @@ void EnvSensingSvc::service(void) {
     uint8_t vbat_per = mvToPercent(vbat_mv);
 
     if (sensor_ok) {
-        if (scd30.dataReady()) {
+        if (recalibrationFlag) {
+            if (millis() - recalibrationTs > recalibrationInterval) {
+                if (scd30.setMeasurementInterval(10)) {
+                    Serial.println("SCD30 recalibration finished!");
+                    recalibrationFlag = false;
+                    blink_led(LED_RED);
+                }
+            }
+        } else if (scd30.dataReady()) {
             if (scd30.read()) {
                 temp.setData((int16_t) (scd30.temperature + 0.5));
                 humid.setData((uint16_t) (scd30.relative_humidity + 0.5));
@@ -296,5 +315,12 @@ void EnvSensingSvc::disconnectCallback(uint16_t conn_handle, uint8_t reason)
     (void) reason;
     Serial.print("Disconnected, reason = 0x");
     Serial.println(reason, HEX);
+}
+
+void blink_led(uint8_t led_pin) {
+    digitalWrite(led_pin, HIGH);
+    delay(250);
+    digitalWrite(led_pin, LOW);
+    delay(250);
 }
 

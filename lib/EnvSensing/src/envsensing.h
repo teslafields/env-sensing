@@ -4,7 +4,7 @@
 #include <bluefruit.h>
 #include <Adafruit_SCD30.h>
 
-#define CO2_REFERENCE 408
+#define CO2_REFERENCE 419
 
 #define UUID_CHR_DESCRIPTOR_ES_MEAS  0x290C
 #define ES_MEAS_DESCR_SIZE 11
@@ -92,14 +92,18 @@ class EnvSensingSvc {
         EnvSensingChr<uint8_t>  batlv;
 
         /* Sensor SCD30 */
-        bool                    sensor_ok = false;
-        Adafruit_SCD30          scd30;
+        bool                sensor_ok = false;
+        Adafruit_SCD30      scd30;
+        bool                recalibrationFlag = false;
+        uint32_t            recalibrationInterval = 300*1000; // ms
+        uint32_t            recalibrationTs = 0;
 };
 
 
 
 void cccdWriteCallback(uint16_t conn_hdl, BLECharacteristic* chr,
         uint16_t cccd_value);
+void blink_led(uint8_t led_pin);
 
 extern uint8_t envSensingDesc[];
 
