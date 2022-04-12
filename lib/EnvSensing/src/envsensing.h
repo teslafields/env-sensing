@@ -3,8 +3,10 @@
 
 #include <bluefruit.h>
 #include <Adafruit_SCD30.h>
+#include "datastorage.h"
 
-#define CO2_REFERENCE 419
+#define CO2_REFERENCE 409
+#define SCD30_DEF_INTERVAL 2
 
 #define UUID_CHR_DESCRIPTOR_ES_MEAS  0x290C
 #define ES_MEAS_DESCR_SIZE 11
@@ -48,6 +50,7 @@ class EnvSensingChr {
     uint16_t chrUuid;
     uint16_t connHdl;
     bool writeFlagged = false;
+
     //void cccdWriteCallback(uint16_t conn_hdl,
     //        BLECharacteristic* chr, uint16_t cccd_value);
 
@@ -62,6 +65,8 @@ class EnvSensingChr {
     serviceData getAdvServiceData(void);
     void setup();
     uint16_t update(void);
+    bool notifyEnabled(void);
+    bool notify(uint8_t *data, uint16_t len);
 };
 
 class EnvSensingSvc {
@@ -70,11 +75,14 @@ class EnvSensingSvc {
         EnvSensingSvc(void);
 
         void setup(void);
+        void setupSensor(void);
         void startAdvertising(void);
         void service(void);
         BLEService& getBLEService(void);
         void updateMeasurements(int16_t t, uint16_t h, uint32_t c,
                 uint8_t b);
+        bool storeTemperature(uint32_t ts, int16_t temp_val);
+        bool clearStorage(void);
         bool recalibrateSensor(void);
 
         /* Callbacks */
@@ -84,12 +92,16 @@ class EnvSensingSvc {
         static void advertisingStopCallback(void);
 
     private:
+        DataStorage storage;
         static uint16_t         connHdl;
+        static bool             justConnected;
         BLEService              svc;
         EnvSensingChr<int16_t>  temp;
         EnvSensingChr<uint16_t> humid;
         EnvSensingChr<uint32_t> co2lv;
         EnvSensingChr<uint8_t>  batlv;
+        uint32_t                storeMeasurementInterval = 1800*1000; // ms
+        uint32_t                storeMeasurementTs = 0;
 
         /* Sensor SCD30 */
         bool                sensor_ok = false;
@@ -97,6 +109,8 @@ class EnvSensingSvc {
         bool                recalibrationFlag = false;
         uint32_t            recalibrationInterval = 300*1000; // ms
         uint32_t            recalibrationTs = 0;
+
+        bool                writeOnce = false;
 };
 
 

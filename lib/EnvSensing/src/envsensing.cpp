@@ -58,6 +58,11 @@ serviceData EnvSensingChr<T>::getAdvServiceData(void) {
 }
 
 template <class T>
+bool EnvSensingChr<T>::notifyEnabled(void) {
+    return bleChr.notifyEnabled();
+}
+
+template <class T>
 void EnvSensingChr<T>::setup() {
     bleChr.setProperties(CHR_PROPS_NOTIFY);
     bleChr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
@@ -78,8 +83,13 @@ void cccdWriteCallback(uint16_t conn_hdl, BLECharacteristic* chr,
 }
 
 template <class T>
+bool EnvSensingChr<T>::notify(uint8_t *data, uint16_t len) {
+    return bleChr.notify(data, len + gattLenOffset);
+}
+
+template <class T>
 uint16_t EnvSensingChr<T>::update(void) {
-    if (bleChr.notifyEnabled()) {
+    if (this->notifyEnabled()) {
         state = NOTIFY;
     } else if (writeFlagged) {
         state = WRITE;
@@ -88,13 +98,12 @@ uint16_t EnvSensingChr<T>::update(void) {
         state = NONE;
     }
 
-    uint16_t ret = 0;
     T data = this->getDataGain();
+    uint16_t ret = 0;
 
     switch (state) {
         case NOTIFY:
-            ret = (uint16_t) bleChr.notify((uint8_t *) &data,
-                    sizeof(chrData) + gattLenOffset);
+            ret = (uint16_t) this->notify((uint8_t *) &data, sizeof(chrData));
             break;
         case WRITE:
             ret = bleChr.write((uint8_t *) &chrData,
@@ -113,6 +122,8 @@ template class EnvSensingChr<int16_t>;
 template class EnvSensingChr<uint32_t>;
 
 uint16_t EnvSensingSvc::connHdl = 0;
+bool EnvSensingSvc::justConnected = false;
+uint8_t storage_data_buffer[256] = {0};
 
 /* Init ESS and its associated characteristics
  * Environmental Sensing Service UUID is 0x181A
@@ -137,6 +148,36 @@ void EnvSensingSvc::updateMeasurements(int16_t t, uint16_t h,
     batlv.setData(b);
 }
 
+uint32_t write_count = 1;
+
+bool EnvSensingSvc::storeTemperature(uint32_t ts, int16_t val_temp) {
+    if (storage.is_read_mode())
+        if (!storage.open_to_write())
+            return false;
+    Serial.print(write_count);
+    Serial.println(" Writing temperature to file..");
+    static uint8_t *d_ptr = (uint8_t *) ts;
+    if (!storage.write(d_ptr, sizeof(ts)))
+        return false;
+    // const uint8_t *sep = (uint8_t *) ";";
+    // const uint8_t *del = (uint8_t *) "\n";
+    d_ptr = (uint8_t *) &val_temp;
+    if (!storage.write((uint8_t *) ";", 1))
+        return false;
+    if (!storage.write(d_ptr, sizeof(val_temp)))
+        return false;
+    if (!storage.write((uint8_t *) "\n", 1))
+        return false;
+    Serial.print("OK ");
+    Serial.println(storage.fsize());
+    write_count++;
+    return true;
+}
+
+bool EnvSensingSvc::clearStorage(void) {
+    return storage.removeFile();
+}
+
 BLEService& EnvSensingSvc::getBLEService(void) {
     return svc;
 }
@@ -150,7 +191,7 @@ bool EnvSensingSvc::recalibrateSensor(void) {
             recalibrationTs = millis();
             result = true;
         } else {
-            scd30.setMeasurementInterval(10);
+            scd30.setMeasurementInterval(SCD30_DEF_INTERVAL);
         }
     }
     return result;
@@ -202,9 +243,20 @@ void EnvSensingSvc::startAdvertising(void) {
     Bluefruit.Advertising.start(ADV_TIMEOUT);
 }
 
+void EnvSensingSvc::setupSensor(void) {
+    if (scd30.begin()) {
+        sensor_ok = true;
+        scd30.setMeasurementInterval(SCD30_DEF_INTERVAL);
+    }
+}
+
 void EnvSensingSvc::setup(void) {
     connHdl = 0;
 
+    /* Setup the LittleFS storage */
+    storage.setup();
+
+    /* Setup ADC */
     setupADC();
 
     Serial.println("\nBluefruit52 GATT ESS");
@@ -229,26 +281,43 @@ void EnvSensingSvc::setup(void) {
     Bluefruit.Periph.setDisconnectCallback(&EnvSensingSvc::disconnectCallback);
 
     /* Make sure sensor is initialized */
-    if (scd30.begin()) {
-        sensor_ok = true;
-        scd30.setMeasurementInterval(2);
-    }
+    this->setupSensor();
+
+    /* Init with a valid timestamp */
+    storeMeasurementTs = millis();
 }
 
 void EnvSensingSvc::service(void) {
     digitalWrite(LED_BLUE, HIGH);
-    float vbat_mv = readVBAT();
-    // Convert from raw mv to percentage (based on LIPO chemistry)
-    uint8_t vbat_per = mvToPercent(vbat_mv);
 
-    if (sensor_ok) {
+    static float vbat_mv;
+    static uint8_t vbat_per;
+    static int16_t val_temp;
+    static uint16_t val_hum;
+    static uint32_t val_co2;
+    static uint32_t ts_now;
+    static size_t n;
+    static uint32_t pos;
+
+    ts_now = millis();
+
+    vbat_mv = readVBAT();
+    // Convert from raw mv to percentage (based on LIPO chemistry)
+    vbat_per =  mvToPercent(vbat_mv);
+
+    if (!sensor_ok) {
+        Serial.println("Sensor not OK, initializing again..");
+        this->setupSensor();
+    } else {
         if (recalibrationFlag) {
-            if (millis() - recalibrationTs > recalibrationInterval) {
-                if (scd30.setMeasurementInterval(10)) {
+            if (ts_now - recalibrationTs > recalibrationInterval) {
+                if (scd30.setMeasurementInterval(SCD30_DEF_INTERVAL)) {
                     Serial.println("SCD30 recalibration finished!");
                     recalibrationFlag = false;
                     blink_led(LED_RED);
-                }
+                } else
+                    Serial.println("SCD30 error seting interval!");
+
             }
         } else if (scd30.dataReady()) {
             if (scd30.read()) {
@@ -265,25 +334,57 @@ void EnvSensingSvc::service(void) {
             Serial.print(" % | CO2: ");
             Serial.print(co2lv.getData());
             Serial.print(" ppm | ");
-        }
-    }
-    Serial.print("Battery: ");
-    Serial.print(vbat_mv);
-    Serial.print(" mV ");
-    Serial.print(vbat_per);
-    Serial.println(" %");
-#else
-        }
-    }
+            Serial.print("Battery: ");
+            Serial.print(vbat_mv);
+            Serial.print(" mV ");
+            Serial.print(vbat_per);
+            Serial.println(" %");
 #endif
+        }
+    }
 
     if ( Bluefruit.connected() ) {
+        if (justConnected && storage.is_file_open()) {
+            if (temp.notifyEnabled()) {
+                Serial.println("Sending out stored values..");
+                if (storage.is_write_mode())
+                    storage.open_to_read();
+                /* Loop here until read returns eof */
+                storage.restore_position();
+                while (!storage.is_eof()) {
+                    pos = storage.ftell();
+                    Serial.print("Reading file, current postition: ");
+                    Serial.println(pos);
+                    n = storage.read(storage_data_buffer, 8);
+                    if (n == 0)
+                        break;
+                    if (!temp.notify(storage_data_buffer + 5, sizeof(val_temp))) {
+                        Serial.println("Notify error!");
+                        if (storage.fseek_set(pos)) {
+                            Serial.print("fseek sucessfully set to: ");
+                            Serial.println(pos);
+                        }
+                        break;
+                    }
+                    /* Give a short delay between notifies */
+                    delay(100);
+                }
+                storage.save_position();
+                /* update the TS to store 30s from now */
+                storeMeasurementTs = ts_now;
+                justConnected = false;
+            }
+        }
+
         temp.update();
         humid.update();
         co2lv.update();
         batlv.update();
     } else if ( !Bluefruit.Advertising.isRunning() ) {
         startAdvertising();
+    } else if (ts_now - storeMeasurementTs > storeMeasurementInterval) {
+        this->storeTemperature(ts_now, temp.getDataGain());
+        storeMeasurementTs = ts_now;
     }
     digitalWrite(LED_BLUE, LOW);
 }
@@ -296,6 +397,7 @@ void EnvSensingSvc::connectCallback(uint16_t conn_handle)
 {
     // Get the reference to current connection
     connHdl = conn_handle;
+    justConnected = true;
     BLEConnection* connection = Bluefruit.Connection(conn_handle);
     char central_name[32] = { 0 };
     connection->getPeerName(central_name, sizeof(central_name));
@@ -311,6 +413,7 @@ void EnvSensingSvc::connectCallback(uint16_t conn_handle)
 void EnvSensingSvc::disconnectCallback(uint16_t conn_handle, uint8_t reason)
 {
     connHdl = 0;
+    justConnected = false;
     (void) conn_handle;
     (void) reason;
     Serial.print("Disconnected, reason = 0x");
