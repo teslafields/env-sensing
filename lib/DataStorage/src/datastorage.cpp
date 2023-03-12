@@ -106,8 +106,10 @@ bool DataStorage::removeFile(void) {
 
 void DataStorage::setup(void) {
     InternalFS.begin();
+    /*
     if ( this->open_to_write() )
         Serial.println(FILEDATA " opened to write!");
+    */
 }
 
 size_t DataStorage::read(uint8_t *buf, size_t size) {
@@ -125,12 +127,17 @@ size_t DataStorage::read(uint8_t *buf, size_t size) {
 }
 
 size_t DataStorage::write(uint8_t const *buf, size_t size) {
+    /*
     if (!fdata.isOpen())
+        return 0;
+    */
+    if ( !this->open_to_write() )
         return 0;
     size_t writelen = fdata.write(buf, size);
     Serial.print("Write bytes: "); Serial.println(writelen);
-    if (writelen > 0)
-        fdata.flush();
+    this->close();
+    // if (writelen > 0)
+    //     fdata.flush();
     return writelen;
 }
 

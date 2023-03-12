@@ -151,7 +151,7 @@ void EnvSensingSvc::updateMeasurements(int16_t t, uint16_t h,
 uint32_t write_count = 1;
 
 bool EnvSensingSvc::storeTemperature(uint32_t ts, int16_t val_temp) {
-    if (storage.is_read_mode())
+    if (!storage.is_file_open() || storage.is_read_mode())
         if (!storage.open_to_write())
             return false;
     Serial.print(write_count);
@@ -298,6 +298,7 @@ void EnvSensingSvc::service(void) {
     static uint32_t ts_now;
     static size_t n;
     static uint32_t pos;
+    uint8_t notify_retries = 48;
 
     ts_now = millis();
 
@@ -344,10 +345,10 @@ void EnvSensingSvc::service(void) {
     }
 
     if ( Bluefruit.connected() ) {
-        if (justConnected && storage.is_file_open()) {
+        if (justConnected) {
             if (temp.notifyEnabled()) {
                 Serial.println("Sending out stored values..");
-                if (storage.is_write_mode())
+                if (!storage.is_file_open() || storage.is_write_mode())
                     storage.open_to_read();
                 /* Loop here until read returns eof */
                 storage.restore_position();
@@ -360,16 +361,21 @@ void EnvSensingSvc::service(void) {
                         break;
                     if (!temp.notify(storage_data_buffer + 5, sizeof(val_temp))) {
                         Serial.println("Notify error!");
+                        notify_retries--;
+                        if (notify_retries == 0) {
+                            notify_retries = 48;
+                            break;
+                        }
                         if (storage.fseek_set(pos)) {
                             Serial.print("fseek sucessfully set to: ");
                             Serial.println(pos);
                         }
-                        break;
                     }
                     /* Give a short delay between notifies */
                     delay(100);
                 }
                 storage.save_position();
+                storage.close();
                 /* update the TS to store 30s from now */
                 storeMeasurementTs = ts_now;
                 justConnected = false;

@@ -39,7 +39,7 @@ void setup()
 
 void loop()
 {
-    if (ess_period_count >= 2) {
+    if (ess_period_count >= 5) {
         ess.service();
         ess_period_count = 0;
     } else {

@@ -6,7 +6,7 @@
 #include "datastorage.h"
 
 #define CO2_REFERENCE 409
-#define SCD30_DEF_INTERVAL 2
+#define SCD30_DEF_INTERVAL 10
 
 #define UUID_CHR_DESCRIPTOR_ES_MEAS  0x290C
 #define ES_MEAS_DESCR_SIZE 11
@@ -100,14 +100,14 @@ class EnvSensingSvc {
         EnvSensingChr<uint16_t> humid;
         EnvSensingChr<uint32_t> co2lv;
         EnvSensingChr<uint8_t>  batlv;
-        uint32_t                storeMeasurementInterval = 1800*1000; // ms
+        uint32_t                storeMeasurementInterval = 600*1000; // ms
         uint32_t                storeMeasurementTs = 0;
 
         /* Sensor SCD30 */
         bool                sensor_ok = false;
         Adafruit_SCD30      scd30;
         bool                recalibrationFlag = false;
-        uint32_t            recalibrationInterval = 300*1000; // ms
+        uint32_t            recalibrationInterval = 600*1000; // ms
         uint32_t            recalibrationTs = 0;
 
         bool                writeOnce = false;
