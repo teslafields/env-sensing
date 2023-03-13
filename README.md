@@ -1,0 +1,1 @@
+An environment sensing solution for [Adafruit's nrf52840 feather](https://www.adafruit.com/product/4062). The project is built through [platformio](https://docs.platformio.org/en/latest/what-is-platformio.html)
