@@ -327,21 +327,21 @@ void EnvSensingSvc::service(void) {
                 co2lv.setData((uint32_t) (scd30.CO2 + 0.5));
                 batlv.setData(vbat_per);
             }
-#ifdef DEBUG_MEASURE
-            Serial.print("Temperature: ");
-            Serial.print(temp.getData());
-            Serial.print(" C | Humidity: ");
-            Serial.print(humid.getData());
-            Serial.print(" % | CO2: ");
-            Serial.print(co2lv.getData());
-            Serial.print(" ppm | ");
-            Serial.print("Battery: ");
-            Serial.print(vbat_mv);
-            Serial.print(" mV ");
-            Serial.print(vbat_per);
-            Serial.println(" %");
-#endif
         }
+#ifdef DEBUG_MEASURE
+        Serial.print("Temperature: ");
+        Serial.print(temp.getData());
+        Serial.print(" C | Humidity: ");
+        Serial.print(humid.getData());
+        Serial.print(" % | CO2: ");
+        Serial.print(co2lv.getData());
+        Serial.print(" ppm | ");
+        Serial.print("Battery: ");
+        Serial.print(vbat_mv);
+        Serial.print(" mV ");
+        Serial.print(vbat_per);
+        Serial.println(" %");
+#endif
     }
 
     if ( Bluefruit.connected() ) {

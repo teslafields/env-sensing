@@ -5,8 +5,9 @@
 #include <Adafruit_SCD30.h>
 #include "datastorage.h"
 
-#define CO2_REFERENCE 409
-#define SCD30_DEF_INTERVAL 10
+// #define CO2_REFERENCE 420 // outdoor city air
+#define CO2_REFERENCE 400 // outdoor wilderness air
+#define SCD30_DEF_INTERVAL 5
 
 #define UUID_CHR_DESCRIPTOR_ES_MEAS  0x290C
 #define ES_MEAS_DESCR_SIZE 11
